@@ -57,9 +57,12 @@ def submit_predictions(config: Config, results: dict):
     team_name = dacon_info["team"]
     submission_memo = dacon_info["submission_memo"]
 
-    result = dacon_submit_api.post_submission_file(
-        str(sub_path), dacon_key, competition_id, team_name, submission_memo
-    )
+    if config.dacon_submit:
+        result = dacon_submit_api.post_submission_file(
+            str(sub_path), dacon_key, competition_id, team_name, submission_memo
+        )
 
-    print(f"[submit] dacon submission result: {result}")
+        print(f"[submit] dacon submission result: {result}")
+
+    print("[submit] done.")
     return str(sub_path)

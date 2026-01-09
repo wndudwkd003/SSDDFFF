@@ -14,7 +14,11 @@ class Config:
     # =========================
     DEBUG_MODE: bool = False
     model_mode: str = "ce"  # ce | contrastive
-    do_mode: str = "train"  # train | test
+    do_mode: str = "test"  # train | test
+
+    test_dir: str | None = (
+        "/workspace/SSDDFF/runs/20260109_085705_clip_large_224"  # | None
+    )
     seed: int = 42
 
     # =========================
@@ -26,6 +30,7 @@ class Config:
     )
     key_json_path: str = "keys.json"
     dacon_json_path: str = "dacon_info.json"
+    dacon_submit: bool = False  # True | False
 
     # =========================
     # 3) 입력/특징(모달리티) 설정
@@ -36,31 +41,37 @@ class Config:
         ]
     )
     use_augmentation: bool = False  # True | False
-    SSDDFFF: bool = False  # True | False
+    SSDDFF: bool = False  # True | False
+    SSDDFF_mode: str = (  # Small Surface Detector for DeepFake Forensics
+        "stage1_convnextv2_train"  # stage1_convnextv2_train | stage2_convnext_v2_gradcam | stage3_clip_finetune
+    )
 
     # =========================
     # 4) 모델/아키텍처 설정
     # =========================
     run_name: str = "clip_large"
-    model_name: str = "openai/clip-vit-large-patch14"
+    model_name: str = (
+        "openai/clip-vit-large-patch14"  # openai/clip-vit-large-patch14 | facebook/convnextv2-large-22k-384
+    )
     num_classes: int = 2
     image_size: int = 224
+    probs_threshold: float = 0.5
 
     # --- stage/head/backbone 동결 등 ---
-    skip_stage1: bool = True  # True | False
-    head: str = "svm"  # mlp | linear | svm
+    skip_stage1: bool = False  # True | False
+    head: str = "linear"  # mlp | linear | svm
     freeze_backbone: bool = True  # True | False
 
     # --- 사전학습/체크포인트 ---
     pretrained: bool = True  # True | False
     pretrained_ckpt_path: str | None = (
-        "/workspace/df40/df40_weights/train_on_df40/clip_large.pth"
+        "/workspace/SSDDFF/runs/20260109_085705_clip_large_224/best_stage1.pth"
     )
 
     # =========================
     # 5) 학습 하이퍼파라미터
     # =========================
-    batch_size: int = 32
+    batch_size: int = 512
     lr: float = 1e-4
     weight_decay: float = 1e-4
     num_epochs: int = 10
