@@ -19,6 +19,10 @@ def get_input_ch(input_features: list[InputFeature]) -> int:
             ch += 3
         elif f == InputFeature.NPR:
             ch += 3
+        elif f == InputFeature.RESIDUAL:
+            ch += 1
+        elif f == InputFeature.WAVELET:
+            ch += 4
     return ch
 
 
