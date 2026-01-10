@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from math import e
+from typing import Literal
 
 
 class ModelName(Enum):
@@ -50,6 +50,8 @@ EVALUATE_DATASES = [
 class Config:
     DEBUG_MODE: bool = False  # True | False
     model_mode: str = "ce"  # "ce" | "ae"
+    ae_normal: Literal["real", "fake"] = "real"
+
     do_mode: str = "train"  # train | test
     use_dataset_sum: bool = False  # True | False
     test_dir: str | None = "/workspace/SSDDFF/runs/20260109_085705_clip_large_224"

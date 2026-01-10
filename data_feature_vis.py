@@ -14,16 +14,33 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 
+# =========================
+# paths
+# =========================
 ROOT = Path("/workspace/SSDDFF/datasets/KoDF")
 TRAIN_JSONL = ROOT / "train.jsonl"
 OUT_DIR = ROOT / "vis_features"
 STAT_DIR = ROOT / "vis_features_stats"
 
+# =========================
+# knobs
+# =========================
 NUM_PAIRS = 20
 SEED = 42
 SIZE = 224
 
-MAX_DIST_SAMPLES = 2000  # 분포 계산에 사용할 real/fake 각각 최대 샘플 수
+# parts
+USE_FACE_ZOOM = True
+FACE_ZOOM_PAD = 0.25
+FACE_ZOOM_SCALE = 2.2
+
+USE_KP_PARTS = True
+KP_PART_SIZE = 224
+KP_PAD_FRAC = 0.18  # around each keypoint, relative to face bbox size
+
+# distribution plots
+DO_HIST = False
+MAX_DIST_SAMPLES = 2000
 HIST_BINS = 60
 
 
@@ -65,7 +82,7 @@ def _npr_from_rgb01(rgb01):
     up = F.interpolate(
         down, scale_factor=2.0, mode="nearest", recompute_scale_factor=True
     )
-    return (x - up).squeeze(0)  # 3xHxW
+    return (x - up).squeeze(0)
 
 
 def _vis_signed_3ch(x3):
@@ -149,10 +166,8 @@ def _haar_wavelet_1level(gray01):
     H, W = x.shape[-2], x.shape[-1]
     if H % 2 == 1:
         x = x[:-1, :]
-        H -= 1
     if W % 2 == 1:
         x = x[:, :-1]
-        W -= 1
 
     a = x[0::2, 0::2]
     b = x[0::2, 1::2]
@@ -174,7 +189,86 @@ def _haar_wavelet_1level(gray01):
     return up(ll), up(lh), up(hl), up(hh)
 
 
-def make_feature_row(pil, tag, tfm):
+def _face_box_from_meta(face, w, h):
+    if face is None:
+        return (0, 0, w, h)
+
+    if "bbox_xyxy" in face:
+        x1, y1, x2, y2 = face["bbox_xyxy"]
+    else:
+        kps = face["kps_5"]
+        xs = [p[0] for p in kps]
+        ys = [p[1] for p in kps]
+        x1, x2 = min(xs), max(xs)
+        y1, y2 = min(ys), max(ys)
+
+    x1 = max(0, int(round(float(x1))))
+    y1 = max(0, int(round(float(y1))))
+    x2 = min(w, int(round(float(x2))))
+    y2 = min(h, int(round(float(y2))))
+    return x1, y1, x2, y2
+
+
+def _crop_zoom_pil(pil0, face):
+    if face is None:
+        return pil0
+
+    w, h = pil0.size
+    x1, y1, x2, y2 = _face_box_from_meta(face, w, h)
+
+    bw = max(1.0, float(x2 - x1))
+    bh = max(1.0, float(y2 - y1))
+    pad = float(FACE_ZOOM_PAD)
+
+    x1 = int(max(0, round(x1 - bw * pad)))
+    y1 = int(max(0, round(y1 - bh * pad)))
+    x2 = int(min(w, round(x2 + bw * pad)))
+    y2 = int(min(h, round(y2 + bh * pad)))
+
+    crop = pil0.crop((x1, y1, x2, y2))
+
+    zoom_side = int(round(SIZE * float(FACE_ZOOM_SCALE)))
+    if zoom_side < SIZE:
+        zoom_side = SIZE
+    crop = crop.resize((zoom_side, zoom_side), resample=Image.BICUBIC)
+
+    cx = zoom_side // 2
+    cy = zoom_side // 2
+    half = SIZE // 2
+    crop = crop.crop((cx - half, cy - half, cx - half + SIZE, cy - half + SIZE))
+    return crop
+
+
+def _crop_kp_part_pil(pil0, face, kp_idx):
+    if face is None:
+        return pil0.resize((KP_PART_SIZE, KP_PART_SIZE), resample=Image.BICUBIC)
+
+    w, h = pil0.size
+    x1, y1, x2, y2 = _face_box_from_meta(face, w, h)
+    bw = max(1.0, float(x2 - x1))
+    bh = max(1.0, float(y2 - y1))
+    base = max(bw, bh)
+
+    kps = face["kps_5"]
+    px, py = kps[kp_idx]
+    px = float(px)
+    py = float(py)
+
+    half = 0.5 * base * float(KP_PAD_FRAC)
+    cx1 = int(max(0, round(px - half)))
+    cy1 = int(max(0, round(py - half)))
+    cx2 = int(min(w, round(px + half)))
+    cy2 = int(min(h, round(py + half)))
+
+    if cx2 <= cx1 + 1 or cy2 <= cy1 + 1:
+        return pil0.resize((KP_PART_SIZE, KP_PART_SIZE), resample=Image.BICUBIC)
+
+    crop = pil0.crop((cx1, cy1, cx2, cy2))
+    crop = crop.resize((KP_PART_SIZE, KP_PART_SIZE), resample=Image.BICUBIC)
+    return crop
+
+
+def make_feature_row(pil, tag, tfm, prefix_text):
     rgb01 = tfm(pil.convert("RGB"))
 
     rgb = _to_uint8_rgb01(rgb01)
@@ -191,7 +285,7 @@ def make_feature_row(pil, tag, tfm):
     res_u8_3 = np.repeat(res_u8[:, :, None], 3, axis=2)
 
     ll, lh, hl, hh = _haar_wavelet_1level(gray01)
-    ll_u8 = _to_uint8_from_gray01(ll)
+    ll_u8 = _to_uint8_from_gray01(ll.clamp(0.0, 1.0))
     lh_u8 = _vis_signed_1ch(lh)
     hl_u8 = _vis_signed_1ch(hl)
     hh_u8 = _vis_signed_1ch(hh)
@@ -202,16 +296,16 @@ def make_feature_row(pil, tag, tfm):
     hh_u8 = np.repeat(hh_u8[:, :, None], 3, axis=2)
 
     tiles = [
-        _put_text_rgb(rgb, "RGB"),
-        _put_text_rgb(r, "R"),
-        _put_text_rgb(g, "G"),
-        _put_text_rgb(b, "B"),
-        _put_text_rgb(npr_vis, "NPR"),
-        _put_text_rgb(res_u8_3, "Residual"),
-        _put_text_rgb(ll_u8, "Wav LL"),
-        _put_text_rgb(lh_u8, "Wav LH"),
-        _put_text_rgb(hl_u8, "Wav HL"),
-        _put_text_rgb(hh_u8, "Wav HH"),
+        _put_text_rgb(rgb, f"{prefix_text} RGB"),
+        _put_text_rgb(r, f"{prefix_text} R"),
+        _put_text_rgb(g, f"{prefix_text} G"),
+        _put_text_rgb(b, f"{prefix_text} B"),
+        _put_text_rgb(npr_vis, f"{prefix_text} NPR"),
+        _put_text_rgb(res_u8_3, f"{prefix_text} Residual"),
+        _put_text_rgb(ll_u8, f"{prefix_text} Wav LL"),
+        _put_text_rgb(lh_u8, f"{prefix_text} Wav LH"),
+        _put_text_rgb(hl_u8, f"{prefix_text} Wav HL"),
+        _put_text_rgb(hh_u8, f"{prefix_text} Wav HH"),
     ]
 
     row = _hstack_with_gap(tiles, gap=10)
@@ -220,7 +314,6 @@ def make_feature_row(pil, tag, tfm):
 
 
 def _add_stats(stats, prefix, x):
-    # x: CxHxW 또는 HxW
     if x.ndim == 2:
         stats.setdefault(prefix + "_mean", []).append(x.mean().item())
         stats.setdefault(prefix + "_std", []).append(x.std(unbiased=False).item())
@@ -264,7 +357,6 @@ def compute_and_save_distributions(real_rows, fake_rows, tfm):
             rgb01 = tfm(pil)
 
             gray01 = _rgb01_to_gray01(rgb01)
-
             npr = _npr_from_rgb01(rgb01)
             res = _residual_gray(gray01)
             ll, lh, hl, hh = _haar_wavelet_1level(gray01)
@@ -306,7 +398,6 @@ def main():
         ]
     )
 
-    # 1) 기존: real vs fake 패널 저장 (상하)
     rr = real_rows[:]
     fr = fake_rows[:]
     random.shuffle(rr)
@@ -314,19 +405,72 @@ def main():
     n = min(NUM_PAIRS, len(rr), len(fr))
 
     for i in range(n):
-        pil_r = Image.open(str(Path(rr[i]["path"]))).convert("RGB")
-        pil_f = Image.open(str(Path(fr[i]["path"]))).convert("RGB")
+        rrow = rr[i]
+        frow = fr[i]
 
-        row_real = make_feature_row(pil_r, "REAL (label=0)", tfm)
-        row_fake = make_feature_row(pil_f, "FAKE (label=1)", tfm)
+        pil_r0 = Image.open(str(Path(rrow["path"]))).convert("RGB")
+        pil_f0 = Image.open(str(Path(frow["path"]))).convert("RGB")
 
-        panel = _vstack_with_gap_rgb([row_real, row_fake], gap=14)
+        face_r = rrow.get("face", None)
+        face_f = frow.get("face", None)
+
+        pil_rz = _crop_zoom_pil(pil_r0, face_r) if USE_FACE_ZOOM else pil_r0
+        pil_fz = _crop_zoom_pil(pil_f0, face_f) if USE_FACE_ZOOM else pil_f0
+
+        parts_r = [pil_r0, pil_rz]
+        parts_f = [pil_f0, pil_fz]
+
+        if USE_KP_PARTS and face_r is not None:
+            for k in range(5):
+                parts_r.append(_crop_kp_part_pil(pil_r0, face_r, k))
+        if USE_KP_PARTS and face_f is not None:
+            for k in range(5):
+                parts_f.append(_crop_kp_part_pil(pil_f0, face_f, k))
+
+        rows_real = []
+        rows_fake = []
+
+        rows_real.append(
+            make_feature_row(parts_r[0], "REAL (label=0) - FULL", tfm, "FULL")
+        )
+        rows_fake.append(
+            make_feature_row(parts_f[0], "FAKE (label=1) - FULL", tfm, "FULL")
+        )
+
+        rows_real.append(
+            make_feature_row(parts_r[1], "REAL (label=0) - ZOOM", tfm, "ZOOM")
+        )
+        rows_fake.append(
+            make_feature_row(parts_f[1], "FAKE (label=1) - ZOOM", tfm, "ZOOM")
+        )
+
+        if USE_KP_PARTS:
+            for k in range(5):
+                if len(parts_r) >= 2 + 5:
+                    rows_real.append(
+                        make_feature_row(
+                            parts_r[2 + k], f"REAL (label=0) - KP{k+1}", tfm, f"KP{k+1}"
+                        )
+                    )
+                if len(parts_f) >= 2 + 5:
+                    rows_fake.append(
+                        make_feature_row(
+                            parts_f[2 + k], f"FAKE (label=1) - KP{k+1}", tfm, f"KP{k+1}"
+                        )
+                    )
+
+        panel_blocks = []
+        for j in range(min(len(rows_real), len(rows_fake))):
+            block = _vstack_with_gap_rgb([rows_real[j], rows_fake[j]], gap=14)
+            panel_blocks.append(block)
+
+        panel = _vstack_with_gap_rgb(panel_blocks, gap=22)
 
         out_name = f"{i:05d}_real_vs_fake_features.jpg"
         save_rgb(OUT_DIR / out_name, panel)
 
-    # 2) 추가: 채널/특징별 분포(Mean/Std) 히스토그램 저장
-    compute_and_save_distributions(real_rows, fake_rows, tfm)
+    if DO_HIST:
+        compute_and_save_distributions(real_rows, fake_rows, tfm)
 
 
 if __name__ == "__main__":

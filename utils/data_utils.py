@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as T
 
 from config.config import Config, InputFeature, DatasetName
+from utils.aug.augmenter import ImageAugmenter, AugmentConfig
 
 
 def read_jsonl(jsonl_path: str):
@@ -216,9 +217,15 @@ def _merge_split_rows(
 
 
 class DF_Dataset_JSON(Dataset):
-    def __init__(self, rows: list[dict], config: Config):
+    def __init__(self, rows: list[dict], config: Config, split: str):
         self.rows = rows
         self.config = config
+        self.split = split
+
+        # train에서만 증강
+        self.augmenter = None
+        if split == "train":
+            self.augmenter = ImageAugmenter(AugmentConfig(), seed=config.seed)
 
     def __len__(self):
         if self.config.DEBUG_MODE:
@@ -228,6 +235,11 @@ class DF_Dataset_JSON(Dataset):
     def __getitem__(self, idx):
         row = self.rows[idx]
         img = Image.open(row["path"]).convert("RGB")
+
+        if self.augmenter is not None:
+            face = row.get("face", None)
+            img = self.augmenter(img, face)
+
         x = build_input_tensor(img, self.config)
         y = torch.tensor(int(row["label"]), dtype=torch.long)
         return {"pixel_values": x, "labels": y}
@@ -273,7 +285,7 @@ def get_train_loader(config: Config, split: str, dataset_name: DatasetName):
     else:
         rows = _load_split_rows(config, train_sets, dataset_name, split)
 
-    ds = DF_Dataset_JSON(rows, config)
+    ds = DF_Dataset_JSON(rows, config, split=split)
     return DataLoader(ds, batch_size=config.batch_size, shuffle=(split == "train"))
 
 
@@ -289,7 +301,7 @@ def get_test_loader_jsonl(config: Config, dataset_name: DatasetName | None):
     else:
         rows = _load_split_rows(config, eval_sets, dataset_name, "test")
 
-    ds = DF_Dataset_JSON(rows, config)
+    ds = DF_Dataset_JSON(rows, config, split="test")
     return DataLoader(ds, batch_size=config.batch_size, shuffle=False)
 
 

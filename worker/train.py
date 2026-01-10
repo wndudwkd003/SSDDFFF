@@ -139,7 +139,15 @@ class Trainer:
             out_fns, out_scores, per_file_scores = aggregate_per_file(
                 scores, filenames, media_types, kind="scores", t_video=0.8
             )
-            preds = [int(s >= float(self.threshold)) for s in out_scores]
+
+            pred_anomaly = [int(s >= float(self.threshold)) for s in out_scores]
+
+            if self.config.ae_normal == "real":
+                preds = pred_anomaly
+            elif self.config.ae_normal == "fake":
+                preds = [1 - p for p in pred_anomaly]
+            else:
+                raise ValueError(f"Invalid config.ae_normal: {self.config.ae_normal}")
 
             return {
                 "filenames": out_fns,
@@ -148,6 +156,7 @@ class Trainer:
                 "per_file_scores": per_file_scores,
                 "threshold": float(self.threshold),
                 "run_dir": str(self.run_dir),
+                "ae_normal": self.config.ae_normal,
             }
 
         probs, filenames, media_types = collect_meta_probs_from_model(
