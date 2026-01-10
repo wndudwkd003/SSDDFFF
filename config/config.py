@@ -1,90 +1,100 @@
 from dataclasses import dataclass, field
+from enum import Enum
+from math import e
 
-"""
-# model name
-    - openai/clip-vit-large-patch14
-    - facebook/convnextv2-large-22k-384
-"""
+
+class ModelName(Enum):
+    CLIP_VIT_LARGE_224 = "openai/clip-vit-large-patch14"
+    CONVNEXTV2_LARGE_384 = "facebook/convnextv2-large-22k-384"
+    XCEPTION = "xception"
+    XCEPTION_AE = "xception_ae"
+
+
+class InputFeature(Enum):
+    RGB = "rgb"
+    WAVELET = "wavelet"
+    NPR = "npr"
+    RESIDUAL = "residual"
+
+
+class DatasetName(Enum):
+    SUM = "SUM"
+    KODF = "KoDF"
+    RVF = "RVF"
+    CELEB_A_FAKE = "CelebAFake"
+    TIMIT_RVF = "TIMIT_RVF"
+    REAL = "REAL"
+
+
+# SELECTED_DATASES = [
+#     (DatasetName.REAL, 1.0),
+# ]
+
+SELECTED_DATASES = [
+    (DatasetName.KODF, 1.0),
+    (DatasetName.RVF, 1.0),
+    (DatasetName.CELEB_A_FAKE, 1.0),
+    (DatasetName.TIMIT_RVF, 1.0),
+]
+
+
+EVALUATE_DATASES = [
+    (DatasetName.KODF, 1.0),
+    (DatasetName.RVF, 1.0),
+    (DatasetName.CELEB_A_FAKE, 1.0),
+    (DatasetName.TIMIT_RVF, 1.0),
+]
 
 
 @dataclass
 class Config:
-    # =========================
-    # 1) 기본 실행/디버그 모드
-    # =========================
-    DEBUG_MODE: bool = False
-    model_mode: str = "ce"  # ce | contrastive
+    DEBUG_MODE: bool = False  # True | False
+    model_mode: str = "ce"  # "ce" | "ae"
     do_mode: str = "train"  # train | test
-
-    test_dir: str | None = (
-        "/workspace/SSDDFF/runs/20260109_085705_clip_large_224"  # | None
-    )
+    use_dataset_sum: bool = False  # True | False
+    test_dir: str | None = "/workspace/SSDDFF/runs/20260109_085705_clip_large_224"
     seed: int = 42
-
-    # =========================
-    # 2) 데이터/경로 관련
-    # =========================
-    datasets_path: str = "datasets/KoDF"
+    datasets_path: str = "datasets"
+    selected_datasets: list[tuple[DatasetName, float]] = field(
+        default_factory=lambda: SELECTED_DATASES
+    )
+    evaluate_datasets: list[tuple[DatasetName, float]] = field(
+        default_factory=lambda: EVALUATE_DATASES
+    )
     test_meta_csv_path: str = (
         "/workspace/preproc_runs/20260103_095554__pad0.5__vf6__qf1__keep5__landmark1__scrfd_faceonly__force1/meta.csv"
     )
     key_json_path: str = "keys.json"
     dacon_json_path: str = "dacon_info.json"
-    dacon_submit: bool = False  # True | False
-
-    # =========================
-    # 3) 입력/특징(모달리티) 설정
-    # =========================
-    input_features: list[str] = field(  # rgb | wavelet | npr | residual
+    dacon_submit: bool = False
+    input_features: list[InputFeature] = field(
         default_factory=lambda: [
-            "rgb",
+            InputFeature.RGB,
+            InputFeature.NPR,
         ]
     )
-    use_augmentation: bool = False  # True | False
-    SSDDFF: bool = False  # True | False
-    SSDDFF_mode: str = (  # Small Surface Detector for DeepFake Forensics
-        "stage1_convnextv2_train"  # stage1_convnextv2_train | stage2_convnext_v2_gradcam | stage3_clip_finetune
-    )
-
-    # =========================
-    # 4) 모델/아키텍처 설정
-    # =========================
-    run_name: str = "convnextv2"
-    model_name: str = (
-        "facebook/convnextv2-large-22k-384"  # openai/clip-vit-large-patch14 | facebook/convnextv2-large-22k-384
-    )
+    input_channels: int = -1
+    use_augmentation: bool = False
+    SSDDFF: bool = False
+    SSDDFF_mode: str = "stage1_convnextv2_train"
+    run_name: str = ModelName.XCEPTION.name
+    model_name: ModelName = ModelName.XCEPTION
     num_classes: int = 2
-    image_size: int = 384
+    image_size: int = 224
     probs_threshold: float = 0.5
-
-    # --- stage/head/backbone 동결 등 ---
-    skip_stage1: bool = False  # True | False
-    head: str = "linear"  # mlp | linear | svm
-    freeze_backbone: bool = False  # True | False
-
-    # --- 사전학습/체크포인트 ---
-    pretrained: bool = False  # True | False
+    skip_stage1: bool = False
+    head: str = "linear"
+    freeze_backbone: bool = False
+    pretrained: bool = False
     pretrained_ckpt_path: str | None = (
         "/workspace/SSDDFF/runs/20260109_085705_clip_large_224/best_stage1.pth"
     )
-
-    # =========================
-    # 5) 학습 하이퍼파라미터
-    # =========================
-    batch_size: int = 8
+    num_epochs: int = 200
+    batch_size: int = 32
     lr: float = 1e-3
     weight_decay: float = 1e-2
-    num_epochs: int = 10
-
-    # =========================
-    # 6) 스케줄러/조기종료
-    # =========================
-    scheduler: str = "cosine"  # cosine | linear | step
-    early_stopping_patience: int | None = 5  # 5 | None
+    scheduler: str = "cosine"
+    early_stopping_patience: int | None = 10
     early_stopping_delta: float = 1e-4
-
-    # =========================
-    # 7) 출력/실험 관리
-    # =========================
     out_dir: str = "out"
     run_dir: str = "runs"

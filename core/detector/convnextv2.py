@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from config.config import Config
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,13 +11,40 @@ from core.projector.head import get_head
 
 
 class ConvNeXtV2LargeDetector(nn.Module):
-
     def __init__(self, config: Config):
         super().__init__()
         self.config = config
 
-        # feature extractor backbone (no classifier head)
-        self.backbone = ConvNextV2Model.from_pretrained(config.model_name)
+        self.backbone = ConvNextV2Model.from_pretrained(config.model_name.value)
+
+        in_ch = int(getattr(config, "input_channels", 3))
+        if in_ch != 3:
+            pe = self.backbone.embeddings.patch_embeddings.projection
+            out_ch = pe.out_channels
+            kh, kw = pe.kernel_size
+            sh, sw = pe.stride
+            ph, pw = pe.padding
+            new = nn.Conv2d(
+                in_ch,
+                out_ch,
+                kernel_size=(kh, kw),
+                stride=(sh, sw),
+                padding=(ph, pw),
+                bias=(pe.bias is not None),
+            )
+
+            with torch.no_grad():
+                w = pe.weight
+                if in_ch > 3:
+                    new.weight[:, :3] = w
+                    for c in range(3, in_ch):
+                        new.weight[:, c : c + 1] = w[:, :1]
+                else:
+                    new.weight.copy_(w[:, :in_ch])
+                if pe.bias is not None:
+                    new.bias.copy_(pe.bias)
+
+            self.backbone.embeddings.patch_embeddings.projection = new
 
         self.emb_dim = int(self.backbone.config.hidden_sizes[-1])
 
@@ -28,7 +56,7 @@ class ConvNeXtV2LargeDetector(nn.Module):
                 output_dim=config.num_classes,
             )
 
-        if config.freeze_backbone:
+        if getattr(config, "freeze_backbone", False):
             for p in self.backbone.parameters():
                 p.requires_grad = False
 
@@ -36,7 +64,6 @@ class ConvNeXtV2LargeDetector(nn.Module):
         out = self.backbone(pixel_values=x, return_dict=True)
 
         emb = out.pooler_output
-
         emb = F.normalize(emb, dim=-1)
 
         if self.head is None:
