@@ -242,7 +242,7 @@ class DF_Dataset_JSON(Dataset):
 
         x = build_input_tensor(img, self.config)
         y = torch.tensor(int(row["label"]), dtype=torch.long)
-        return {"pixel_values": x, "labels": y}
+        return {"pixel_values": x, "labels": y, "path": row["path"]}
 
 
 class DF_Dataset_CSV(Dataset):
@@ -310,7 +310,9 @@ def get_test_loader_submission(config: Config):
     return DataLoader(ds, batch_size=config.batch_size, shuffle=False)
 
 
-def get_data_loader(config: Config, split: str, dataset_name: DatasetName):
+def get_data_loader(
+    config: Config, split: str, dataset_name: DatasetName | None = None
+):
     if config.do_mode == "train":
         if split in ["train", "valid"]:
             return get_train_loader(config, split, dataset_name)

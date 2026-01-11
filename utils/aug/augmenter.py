@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
-
+from dataclasses import dataclass, field
 import numpy as np
 from PIL import Image
 
-from .ops_independent import (
+from utils.aug.ops_independent import (
     IndependentAugConfig,
     iso_resize_and_pad,
     rotate,
@@ -15,13 +14,13 @@ from .ops_independent import (
     apply_hom_to_points,
     occlude_rect_from_two_kps,
 )
-from .ops_limited import LimitedAugConfig, apply_limited_color_ops
+from utils.aug.ops_limited import LimitedAugConfig, apply_limited_color_ops
 
 
 @dataclass
 class AugmentConfig:
-    independent: IndependentAugConfig = IndependentAugConfig()
-    limited_color: LimitedAugConfig = LimitedAugConfig()
+    independent: IndependentAugConfig = field(default_factory=IndependentAugConfig)
+    limited_color: LimitedAugConfig = field(default_factory=LimitedAugConfig)
 
 
 def _get_kps5(face: dict | None) -> np.ndarray | None:

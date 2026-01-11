@@ -23,6 +23,7 @@ from worker.pipelines import (
     collect_meta_probs_from_model,
     collect_meta_scores_from_ae,
     aggregate_per_file,
+    save_correct_wrong_images_ce,
 )
 
 
@@ -31,7 +32,7 @@ class Trainer:
         self,
         config: Config,
         *,
-        train_dataset: DatasetName,
+        train_dataset: DatasetName | None,
         run_dir: Path | None = None,
     ):
         self.config = config
@@ -68,13 +69,18 @@ class Trainer:
         self.model.to(self.device)
 
     def _load_for_test(self) -> None:
+        if self.config.pretrained_ckpt_path is None:
+            raise ValueError(
+                f"[train.py] 현재 테스트 모드이므로 가중치 경로와 모델 모드를 확인하세요."
+            )
+
         if self.config.model_mode == "ae":
-            ckpt = torch.load(self.run_dir / "best_ae.pth", map_location="cpu")
+            ckpt = torch.load(self.config.pretrained_ckpt_path, map_location="cpu")
             self.model.load_state_dict(ckpt, strict=True)
             self.threshold = float(np.load(self.run_dir / "threshold.npy").item())
             return
 
-        ckpt = torch.load(self.run_dir / "best_stage1.pth", map_location="cpu")
+        ckpt = torch.load(self.config.pretrained_ckpt_path, map_location="cpu")
         self.model.load_state_dict(ckpt, strict=True)
 
     def train(self):
@@ -122,6 +128,25 @@ class Trainer:
                 **out,
             }
 
+        if self.config.do_mode == "train":
+            test_loader = get_data_loader(
+                self.config, "test", dataset_name=self.train_dataset
+            )
+            save_correct_wrong_images_ce(
+                model=self.model,
+                loader=test_loader,
+                config=self.config,
+                device=self.device,
+                out_dir=str(self.run_dir / "viz_correct_wrong"),
+            )
+
+        out = eval_all_ce(model=self.model, config=self.config, device=self.device)
+        return {
+            "run_dir": str(self.run_dir),
+            "train_dataset": self.train_dataset.value,
+            **out,
+        }
+
         out = eval_all_ce(model=self.model, config=self.config, device=self.device)
         return {
             "run_dir": str(self.run_dir),
@@ -130,7 +155,7 @@ class Trainer:
         }
 
     def test_for_submission(self):
-        loader = get_data_loader(self.config, "test", dataset_name=self.train_dataset)
+        loader = get_data_loader(self.config, "test")
 
         if self.config.model_mode == "ae":
             scores, filenames, media_types = collect_meta_scores_from_ae(

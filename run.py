@@ -68,7 +68,7 @@ def main(config: Config):
         return
 
     if config.do_mode == "test":
-        trainer = Trainer(config, train_dataset=DatasetName.SUM)
+        trainer = Trainer(config, train_dataset=None)
         results = trainer.test_for_submission()
         submit_predictions(config, results)
         return

@@ -13,6 +13,50 @@ from config.config import Config, DatasetName
 from utils.data_utils import get_data_loader, get_test_loader_jsonl
 from utils.strategy import confident_strategy
 from utils.losses import ReconLoss, anomaly_score_l1
+from pathlib import Path
+from PIL import Image
+import torch
+import torch.nn.functional as F
+
+from utils.viz_features import render_feature_images
+
+
+@torch.no_grad()
+def save_correct_wrong_images_ce(model, loader, config, device, out_dir: str):
+    out_root = Path(out_dir)
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    model.eval()
+
+    for batch in loader:
+        x = batch["pixel_values"].to(device)
+        y = batch["labels"].to(device)
+        paths = batch["path"]
+
+        out = model(x)
+        logits = out["logits"] if isinstance(out, dict) and "logits" in out else out
+        if logits.dim() == 2 and logits.size(-1) == 2:
+            prob = F.softmax(logits, dim=-1)[:, 1]
+        else:
+            prob = torch.sigmoid(logits.view(-1))
+
+        pred = (prob >= 0.5).long()
+
+        for i in range(x.size(0)):
+            ok = int(pred[i].item() == y[i].item())
+            group = "correct" if ok == 1 else "wrong"
+            base = Path(paths[i]).stem
+
+            img_pil = Image.open(paths[i]).convert("RGB")
+            feats = render_feature_images(img_pil, config)
+
+            for k, im in feats.items():
+                d = out_root / k / group
+                d.mkdir(parents=True, exist_ok=True)
+                im.save(
+                    d
+                    / f"{base}_y{int(y[i])}_p{int(pred[i])}_prob{float(prob[i]):.5f}.png"
+                )
 
 
 def build_optim_and_scheduler(model: nn.Module, config: Config):
@@ -88,7 +132,8 @@ def run_epoch_ce(
 
 
 def run_epoch_ae(
-    *,
+    epoch: int,
+    max_epoch: int,
     model: nn.Module,
     loader: torch.utils.data.DataLoader,
     device: torch.device,
@@ -106,7 +151,8 @@ def run_epoch_ae(
     all_labels: list[int] = []
     all_preds: list[int] = []
 
-    for batch in tqdm(loader, desc=f"Epoch {split}"):
+    pbar = tqdm(loader, desc=f"Epoch {epoch}/{max_epoch} {split}")
+    for batch in pbar:
         x = batch["pixel_values"].to(device)
         y = batch["labels"].to(device)
 
@@ -114,6 +160,8 @@ def run_epoch_ae(
         recon = out["recon"]
 
         loss = recon_loss(recon, x)["loss"]
+        pbar.set_postfix({"loss": float(loss.item())})
+        pbar.refresh()
 
         if is_train:
             opt.zero_grad()
@@ -139,6 +187,7 @@ def run_epoch_ae(
     if threshold is not None:
         out_dict["preds"] = all_preds
         out_dict["threshold"] = float(threshold)
+
     return out_dict
 
 
@@ -211,8 +260,10 @@ def train_ae(
     last_train = None
     last_valid = None
 
-    for _epoch in range(config.num_epochs):
+    for epoch in range(config.num_epochs):
         last_train = run_epoch_ae(
+            epoch=epoch,
+            max_epoch=config.num_epochs,
             model=model,
             loader=train_loader,
             device=device,
@@ -222,6 +273,8 @@ def train_ae(
             threshold=None,
         )
         last_valid = run_epoch_ae(
+            epoch=epoch,
+            max_epoch=config.num_epochs,
             model=model,
             loader=valid_loader,
             device=device,

@@ -1,6 +1,5 @@
 # worker/submit.py
 
-
 from pathlib import Path
 import pandas as pd
 
@@ -17,26 +16,13 @@ def read_dacon_info(config: Config):
 
 
 def submit_predictions(config: Config, results: dict):
-    """
-    results expected keys (from Trainer.test_for_submission):
-      - filenames: list[str]   (원본 샘플 단위)
-      - probs:     list[float] (0~1)
-      - preds:     list[int]   (0/1)  (없으면 probs로 생성 가능)
-      - run_dir:   str         (저장 경로)
-    저장 포맷:
-      - submission.csv : filename, label
-      - submission_prob.csv : filename, prob
-    """
     run_dir = Path(results["run_dir"])
     run_dir.mkdir(parents=True, exist_ok=True)
 
     filenames = results["filenames"]
     probs = results["probs"]
 
-    if "preds" in results:
-        preds = results["preds"]
-    else:
-        preds = [int(p >= 0.5) for p in probs]
+    preds = results["preds"] if "preds" in results else [int(p >= 0.5) for p in probs]
 
     sub_path = run_dir / "submission.csv"
     df = pd.DataFrame({"filename": filenames, "label": preds})
@@ -44,12 +30,11 @@ def submit_predictions(config: Config, results: dict):
 
     prob_path = run_dir / "submission_prob.csv"
     dfp = pd.DataFrame({"filename": filenames, "prob": probs})
-    dfp.to_csv(prob_path, index=False)
+    dfp.to_csv(prob_path, index=False, float_format="%.5f")
 
     print(f"[submit] saved: {sub_path}")
     print(f"[submit] saved: {prob_path}")
 
-    # dacon
     dacon_info = read_dacon_info(config)
 
     dacon_key = os.getenv(dacon_info["key_env"])
@@ -61,7 +46,6 @@ def submit_predictions(config: Config, results: dict):
         result = dacon_submit_api.post_submission_file(
             str(sub_path), dacon_key, competition_id, team_name, submission_memo
         )
-
         print(f"[submit] dacon submission result: {result}")
 
     print("[submit] done.")

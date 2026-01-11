@@ -49,12 +49,12 @@ EVALUATE_DATASES = [
 @dataclass
 class Config:
     DEBUG_MODE: bool = False  # True | False
-    model_mode: str = "ce"  # "ce" | "ae"
+    model_mode: str = "ae"  # "ce" | "ae"
     ae_normal: Literal["real", "fake"] = "real"
 
-    do_mode: str = "train"  # train | test
+    do_mode: str = "test"  # train | test
     use_dataset_sum: bool = False  # True | False
-    test_dir: str | None = "/workspace/SSDDFF/runs/20260109_085705_clip_large_224"
+    test_dir: str | None = "runs/20260110_121501_XCEPTION_AE_224"
     seed: int = 42
     datasets_path: str = "datasets"
     selected_datasets: list[tuple[DatasetName, float]] = field(
@@ -79,17 +79,17 @@ class Config:
     use_augmentation: bool = False
     SSDDFF: bool = False
     SSDDFF_mode: str = "stage1_convnextv2_train"
-    run_name: str = ModelName.XCEPTION.name
-    model_name: ModelName = ModelName.XCEPTION
+    run_name: str = ModelName.XCEPTION_AE.name
+    model_name: ModelName = ModelName.XCEPTION_AE
     num_classes: int = 2
     image_size: int = 224
     probs_threshold: float = 0.5
     skip_stage1: bool = False
     head: str = "linear"
     freeze_backbone: bool = False
-    pretrained: bool = False
+    pretrained: bool = True
     pretrained_ckpt_path: str | None = (
-        "/workspace/SSDDFF/runs/20260109_085705_clip_large_224/best_stage1.pth"
+        "runs/20260110_121501_XCEPTION_AE_224/REAL/best_ae.pth"
     )
     num_epochs: int = 200
     batch_size: int = 32
