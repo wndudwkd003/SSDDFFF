@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
+from regex import T
+
 
 class ModelName(Enum):
     CLIP_VIT_LARGE_224 = "openai/clip-vit-large-patch14"
@@ -24,17 +26,24 @@ class DatasetName(Enum):
     CELEB_A_FAKE = "CelebAFake"
     TIMIT_RVF = "TIMIT_RVF"
     REAL = "REAL"
+    DF40 = "DF40"
+    KODF_FULL = "KoDF_Full"
+    VFBR = "VFBR"
+    RVF_FULL = "RVF_Full"
+    FFPP_C23 = "FFPP_C23"
 
 
 # SELECTED_DATASES = [
 #     (DatasetName.REAL, 1.0),
+#     (DatasetName.DF40, 1.0),
+#     (DatasetName.KODF, 1.0),
+#     # (DatasetName.RVF, 1.0),
+#     (DatasetName.CELEB_A_FAKE, 1.0),
+#     (DatasetName.TIMIT_RVF, 1.0),
 # ]
 
 SELECTED_DATASES = [
-    (DatasetName.KODF, 1.0),
-    (DatasetName.RVF, 1.0),
-    (DatasetName.CELEB_A_FAKE, 1.0),
-    (DatasetName.TIMIT_RVF, 1.0),
+    (DatasetName.REAL, 1.0),
 ]
 
 
@@ -43,6 +52,8 @@ EVALUATE_DATASES = [
     (DatasetName.RVF, 1.0),
     (DatasetName.CELEB_A_FAKE, 1.0),
     (DatasetName.TIMIT_RVF, 1.0),
+    (DatasetName.REAL, 1.0),
+    (DatasetName.DF40, 1.0),
 ]
 
 
@@ -73,10 +84,11 @@ class Config:
         default_factory=lambda: [
             InputFeature.RGB,
             InputFeature.NPR,
+            InputFeature.WAVELET,
         ]
     )
     input_channels: int = -1
-    use_augmentation: bool = False
+    use_augmentation: bool = True
     SSDDFF: bool = False
     SSDDFF_mode: str = "stage1_convnextv2_train"
     run_name: str = ModelName.XCEPTION_AE.name
@@ -87,16 +99,14 @@ class Config:
     skip_stage1: bool = False
     head: str = "linear"
     freeze_backbone: bool = False
-    pretrained: bool = True
-    pretrained_ckpt_path: str | None = (
-        "runs/20260110_121501_XCEPTION_AE_224/REAL/best_ae.pth"
-    )
-    num_epochs: int = 200
-    batch_size: int = 32
+    pretrained: bool = False
+    pretrained_ckpt_path: str | None = None
+    num_epochs: int = 2
+    batch_size: int = 64
     lr: float = 1e-3
-    weight_decay: float = 1e-2
+    weight_decay: float = 1e-4
     scheduler: str = "cosine"
-    early_stopping_patience: int | None = 10
+    early_stopping_patience: int | None = 2
     early_stopping_delta: float = 1e-4
     out_dir: str = "out"
     run_dir: str = "runs"

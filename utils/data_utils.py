@@ -277,12 +277,18 @@ class DF_Dataset_CSV(Dataset):
         }
 
 
-def get_train_loader(config: Config, split: str, dataset_name: DatasetName):
+def get_train_loader(
+    config: Config, split: str, dataset_name: DatasetName | None = None
+):
     train_sets = config.selected_datasets
+
+    if dataset_name == DatasetName.SUM:
+        dataset_name = None
 
     if config.use_dataset_sum:
         rows = _merge_split_rows(config, train_sets, split)
     else:
+        assert dataset_name is not None
         rows = _load_split_rows(config, train_sets, dataset_name, split)
 
     ds = DF_Dataset_JSON(rows, config, split=split)
@@ -291,6 +297,9 @@ def get_train_loader(config: Config, split: str, dataset_name: DatasetName):
 
 def get_test_loader_jsonl(config: Config, dataset_name: DatasetName | None):
     eval_sets = config.evaluate_datasets
+
+    if dataset_name == DatasetName.SUM:
+        dataset_name = None
 
     if dataset_name is None:
         if config.use_dataset_sum:

@@ -18,13 +18,15 @@ from utils.losses import ReconLoss
 from worker.pipelines import (
     train_ce,
     train_ae,
-    eval_all_ce,
-    eval_all_ae,
+)
+
+from worker.collect_result import (
     collect_meta_probs_from_model,
     collect_meta_scores_from_ae,
     aggregate_per_file,
-    save_correct_wrong_images_ce,
 )
+from worker.pipeline_evals import eval_all_ce, eval_all_ae
+from utils.viz_features import save_correct_wrong_images_ce
 
 
 class Trainer:
@@ -139,13 +141,6 @@ class Trainer:
                 device=self.device,
                 out_dir=str(self.run_dir / "viz_correct_wrong"),
             )
-
-        out = eval_all_ce(model=self.model, config=self.config, device=self.device)
-        return {
-            "run_dir": str(self.run_dir),
-            "train_dataset": self.train_dataset.value,
-            **out,
-        }
 
         out = eval_all_ce(model=self.model, config=self.config, device=self.device)
         return {
