@@ -1,91 +1,91 @@
 # /workspace/SSDDFF/worker/pipelines.py
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
+from PIL import Image
 from tqdm.auto import tqdm
 
-from config.config import Config, DatasetName
-from utils.losses import ReconLoss, anomaly_score_l1
-from pathlib import Path
-from PIL import Image
-import torch
-import torch.nn.functional as F
-
-from utils.viz_features import render_feature_images
 import matplotlib.pyplot as plt
-from torchvision.utils import make_grid, save_image
 
+from config.config import Config
+from utils.losses import ReconLoss, anomaly_score_l1
+from utils.viz_features import render_feature_images, compose_feature_grid
+from utils.train_utils import build_optim_and_scheduler, update_loss_curve_image
 
-def _atomic_savefig(fig, out_path: Path, dpi: int = 160):
-    out_path = Path(out_path)
-    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
-    fig.savefig(tmp, dpi=dpi)
-    plt.close(fig)
-    tmp.replace(out_path)
-
-
-def update_loss_curve_image(
-    train_losses: list[float], valid_losses: list[float], out_path: Path
-):
-    epochs = list(range(1, len(train_losses) + 1))
-
-    fig = plt.figure()
-    plt.plot(epochs, train_losses, label="train")
-    plt.plot(epochs, valid_losses, label="valid")
-    plt.xlabel("epoch")
-    plt.ylabel("loss")
-    plt.legend()
-    plt.tight_layout()
-
-    _atomic_savefig(fig, Path(out_path))
+from utils.viz_features import tensor_to_pil_rgb
 
 
 @torch.no_grad()
-def update_recon_preview_image(
-    model: nn.Module, loader, device: torch.device, out_path: Path
+def save_recon_preview_folder(
+    model: nn.Module,
+    loader,
+    device: torch.device,
+    out_dir: Path,
+    config: Config,
+    *,
+    epoch: int,
+    max_items: int = 16,
+    overwrite_each_epoch: bool = True,
 ):
     model.eval()
 
-    batch = next(iter(loader))
-    x = batch["pixel_values"].to(device)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    out = model(x)
-    recon = out["recon"]
+    cols = len(config.input_features)
 
-    # 첫 샘플만: (원본 | 복원) 2장 그리드로 저장
-    x0 = x[:1].detach().cpu()
-    r0 = recon[:1].detach().cpu()
+    saved = 0
+    for batch in loader:
+        if saved >= max_items:
+            break
 
-    grid = make_grid(torch.cat([x0, r0], dim=0), nrow=2, normalize=True)
-    tmp = Path(out_path).with_suffix(Path(out_path).suffix + ".tmp")
-    save_image(grid, tmp)
-    tmp.replace(out_path)
+        x = batch["pixel_values"].to(device)
+        out = model(x)
+        recon = out["recon"]
 
+        for i in range(x.size(0)):
+            if saved >= max_items:
+                break
 
-def build_optim_and_scheduler(model: nn.Module, config: Config):
-    params = [p for p in model.parameters() if p.requires_grad]
-    opt = torch.optim.AdamW(params, lr=config.lr, weight_decay=config.weight_decay)
+            x_pil = tensor_to_pil_rgb(x[i : i + 1])
+            r_pil = tensor_to_pil_rgb(recon[i : i + 1])
 
-    if config.scheduler == "cosine":
-        sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=config.num_epochs)
-    elif config.scheduler == "linear":
-        sch = torch.optim.lr_scheduler.LambdaLR(
-            opt,
-            lr_lambda=lambda e: max(0.0, 1.0 - (e / float(max(1, config.num_epochs)))),
-        )
-    elif config.scheduler == "step":
-        sch = torch.optim.lr_scheduler.StepLR(
-            opt, step_size=max(1, config.num_epochs // 3), gamma=0.1
-        )
-    else:
-        sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=config.num_epochs)
+            feats_x = render_feature_images(x_pil, config)
+            feats_r = render_feature_images(r_pil, config)
 
-    return opt, sch
+            merged: dict[str, Image.Image] = {}
+            for k, im in feats_x.items():
+                merged[f"IN_{k}"] = im
+            for k, im in feats_r.items():
+                merged[f"RECON_{k}"] = im
+
+            grid = compose_feature_grid(
+                merged,
+                tile_size=int(config.image_size),
+                cols=cols,
+                pad=8,
+                bg=(0, 0, 0),
+            )
+
+            if overwrite_each_epoch:
+                fn = f"epoch{epoch:04d}_idx{saved:03d}.png"
+            else:
+                fn = f"epoch{epoch:04d}_idx{saved:03d}_{np.random.randint(0, 10**9):09d}.png"
+
+            out_path = out_dir / fn
+            tmp = out_path.with_name(f"{out_path.stem}.tmp{out_path.suffix}")
+            grid.save(tmp)
+            os.replace(tmp, out_path)
+
+            saved += 1
+
+    return {"saved": saved, "out_dir": str(out_dir)}
 
 
 def run_epoch_ce(
@@ -109,8 +109,8 @@ def run_epoch_ce(
     all_labels: list[int] = []
 
     epoch_str = f"Epoch {epoch}/{max_epoch} {split}" if split != "test" else "Test"
-
     pbar = tqdm(loader, desc=epoch_str)
+
     for batch in pbar:
         x = batch["pixel_values"].to(device)
         y = batch["labels"].to(device)
@@ -120,7 +120,6 @@ def run_epoch_ce(
 
         loss = loss_fn(logits, y)
         pbar.set_postfix({"loss": float(loss.item())})
-        pbar.refresh()
 
         if is_train:
             opt.zero_grad()
@@ -166,8 +165,8 @@ def run_epoch_ae(
     all_preds: list[int] = []
 
     epoch_str = f"Epoch {epoch}/{max_epoch} {split}" if split != "test" else "Test"
-
     pbar = tqdm(loader, desc=epoch_str)
+
     for batch in pbar:
         x = batch["pixel_values"].to(device)
         y = batch["labels"].to(device)
@@ -177,7 +176,6 @@ def run_epoch_ae(
 
         loss = recon_loss(recon, x)["loss"]
         pbar.set_postfix({"loss": float(loss.item())})
-        pbar.refresh()
 
         if is_train:
             opt.zero_grad()
@@ -260,6 +258,13 @@ def train_ce(
     }
 
 
+def get_threshold(last_valid, thr_path: Path):
+    scores = np.asarray(last_valid["scores"], dtype=np.float32)
+    best_thr = float(np.quantile(scores, 0.99))
+    np.save(thr_path, np.asarray(best_thr, dtype=np.float32))
+    return best_thr
+
+
 def train_ae(
     model: nn.Module,
     train_loader,
@@ -274,7 +279,6 @@ def train_ae(
     best_valid_loss = float("inf")
     best_path = run_dir / "best_ae.pth"
 
-    # 곡선 저장용 리스트
     train_losses: list[float] = []
     valid_losses: list[float] = []
 
@@ -284,7 +288,7 @@ def train_ae(
     last_valid = None
 
     loss_curve_path = run_dir / "loss_curve.png"
-    recon_preview_path = run_dir / "recon_preview.png"
+    recon_preview_dir = run_dir / "recon_preview"
     thr_path = run_dir / "threshold.npy"
 
     for epoch in range(config.num_epochs):
@@ -315,7 +319,17 @@ def train_ae(
         train_losses.append(float(last_train["loss"]))
         valid_losses.append(float(last_valid["loss"]))
         update_loss_curve_image(train_losses, valid_losses, loss_curve_path)
-        update_recon_preview_image(model, valid_loader, device, recon_preview_path)
+
+        save_recon_preview_folder(
+            model=model,
+            loader=valid_loader,
+            device=device,
+            out_dir=recon_preview_dir,
+            config=config,
+            epoch=epoch + 1,
+            max_items=config.recon_preview_max_items,
+            overwrite_each_epoch=True,
+        )
 
         v = float(last_valid["loss"])
         if v < best_valid_loss:
@@ -332,14 +346,7 @@ def train_ae(
         "best_ckpt_path": str(best_path),
         "threshold": float(best_thr),
         "loss_curve_path": str(loss_curve_path),
-        "recon_preview_path": str(recon_preview_path),
+        "recon_preview_dir": str(recon_preview_dir),
         "train": last_train,
         "valid": last_valid,
     }, float(best_thr)
-
-
-def get_threshold(last_valid, thr_path):
-    scores = np.asarray(last_valid["scores"], dtype=np.float32)
-    best_thr = float(np.quantile(scores, 0.99))
-    np.save(thr_path, np.asarray(best_thr, dtype=np.float32))
-    return best_thr

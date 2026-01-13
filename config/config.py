@@ -33,27 +33,23 @@ class DatasetName(Enum):
     FFPP_C23 = "FFPP_C23"
 
 
-# SELECTED_DATASES = [
-#     (DatasetName.REAL, 1.0),
-#     (DatasetName.DF40, 1.0),
-#     (DatasetName.KODF, 1.0),
-#     # (DatasetName.RVF, 1.0),
-#     (DatasetName.CELEB_A_FAKE, 1.0),
-#     (DatasetName.TIMIT_RVF, 1.0),
-# ]
-
 SELECTED_DATASES = [
-    (DatasetName.REAL, 1.0),
+    (DatasetName.DF40, 1.0),
 ]
+
+# SELECTED_DATASES = [
+#     (DatasetName.FFPP_C23, 1.0),
+# ]
 
 
 EVALUATE_DATASES = [
-    (DatasetName.KODF, 1.0),
-    (DatasetName.RVF, 1.0),
-    (DatasetName.CELEB_A_FAKE, 1.0),
-    (DatasetName.TIMIT_RVF, 1.0),
     (DatasetName.REAL, 1.0),
     (DatasetName.DF40, 1.0),
+    (DatasetName.KODF, 1.0),
+    (DatasetName.CELEB_A_FAKE, 1.0),
+    (DatasetName.TIMIT_RVF, 1.0),
+    (DatasetName.VFBR, 1.0),
+    (DatasetName.FFPP_C23, 1.0),
 ]
 
 
@@ -61,11 +57,11 @@ EVALUATE_DATASES = [
 class Config:
     DEBUG_MODE: bool = False  # True | False
     model_mode: str = "ae"  # "ce" | "ae"
-    ae_normal: Literal["real", "fake"] = "real"
+    ae_normal: Literal["real", "fake"] = "fake"
 
-    do_mode: str = "test"  # train | test
+    do_mode: str = "train"  # train | test
     use_dataset_sum: bool = False  # True | False
-    test_dir: str | None = "runs/20260110_121501_XCEPTION_AE_224"
+    test_dir: str | None = None
     seed: int = 42
     datasets_path: str = "datasets"
     selected_datasets: list[tuple[DatasetName, float]] = field(
@@ -100,13 +96,17 @@ class Config:
     head: str = "linear"
     freeze_backbone: bool = False
     pretrained: bool = False
-    pretrained_ckpt_path: str | None = None
-    num_epochs: int = 2
+    pretrained_ckpt_path: str | None = (
+        "runs/20260112_031533_XCEPTION_224/SUM/best_stage1.pth"
+    )
+    num_epochs: int = 50
     batch_size: int = 64
     lr: float = 1e-3
     weight_decay: float = 1e-4
     scheduler: str = "cosine"
-    early_stopping_patience: int | None = 2
+    early_stopping_patience: int | None = 5
     early_stopping_delta: float = 1e-4
     out_dir: str = "out"
     run_dir: str = "runs"
+    recon_preview_max_items: int = 16
+    correct_wrong_max_total: int = 20

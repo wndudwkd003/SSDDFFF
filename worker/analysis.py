@@ -141,6 +141,7 @@ def build_cross_dataset_grids(runs_root: str, out_dir=None, metric_keys=None):
     for per_ds in cross_map.values():
         test_set.update(per_ds.keys())
     test_list = sorted(test_set)
+    train_list = sorted(train_list)
 
     for mk in metric_keys:
         mat = np.full((len(train_list), len(test_list)), np.nan, dtype=float)

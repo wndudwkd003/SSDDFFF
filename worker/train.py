@@ -140,6 +140,7 @@ class Trainer:
                 config=self.config,
                 device=self.device,
                 out_dir=str(self.run_dir / "viz_correct_wrong"),
+                max_total=self.config.correct_wrong_max_total,
             )
 
         out = eval_all_ce(model=self.model, config=self.config, device=self.device)
