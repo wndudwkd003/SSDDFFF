@@ -20,20 +20,27 @@ def submit_predictions(config: Config, results: dict):
     run_dir.mkdir(parents=True, exist_ok=True)
 
     filenames = results["filenames"]
-    probs = results["probs"]
+    preds = results["preds"]
 
-    preds = results["preds"] if "preds" in results else [int(p >= 0.5) for p in probs]
+    # CE: probs, AE: scores
+    if "probs" in results:
+        values = results["probs"]
+        value_col = "prob"
+        value_path = run_dir / "submission_prob.csv"
+    else:
+        values = results["scores"]
+        value_col = "score"
+        value_path = run_dir / "submission_score.csv"
 
     sub_path = run_dir / "submission.csv"
     df = pd.DataFrame({"filename": filenames, "label": preds})
     df.to_csv(sub_path, index=False)
 
-    prob_path = run_dir / "submission_prob.csv"
-    dfp = pd.DataFrame({"filename": filenames, "prob": probs})
-    dfp.to_csv(prob_path, index=False, float_format="%.5f")
+    dfv = pd.DataFrame({"filename": filenames, value_col: values})
+    dfv.to_csv(value_path, index=False, float_format="%.5f")
 
     print(f"[submit] saved: {sub_path}")
-    print(f"[submit] saved: {prob_path}")
+    print(f"[submit] saved: {value_path}")
 
     dacon_info = read_dacon_info(config)
 

@@ -1,5 +1,4 @@
 # utils/aug/augmenter.py
-from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
@@ -35,15 +34,61 @@ def _get_kps5(face: dict | None) -> np.ndarray | None:
     return kps
 
 
+def _transform_face_meta(
+    face: dict | None,
+    H_acc: np.ndarray,
+    out_w: int,
+    out_h: int,
+) -> dict | None:
+    if face is None:
+        return None
+
+    face_out = dict(face)
+
+    # kps 변환
+    kps = _get_kps5(face)
+    if kps is not None:
+        kps_t = apply_hom_to_points(H_acc, kps)  # (5,2)
+        kps_t[:, 0] = np.clip(kps_t[:, 0], 0.0, float(out_w - 1))
+        kps_t[:, 1] = np.clip(kps_t[:, 1], 0.0, float(out_h - 1))
+        face_out["kps_5"] = kps_t.astype(np.float32).tolist()
+
+    # bbox 변환(있으면)
+    bbox = face.get("bbox_xyxy", None)
+    if bbox is not None:
+        x1, y1, x2, y2 = bbox
+        corners = np.asarray(
+            [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+            dtype=np.float32,
+        )
+        corners_t = apply_hom_to_points(H_acc, corners)
+        cx1 = float(corners_t[:, 0].min())
+        cy1 = float(corners_t[:, 1].min())
+        cx2 = float(corners_t[:, 0].max())
+        cy2 = float(corners_t[:, 1].max())
+        cx1 = float(np.clip(cx1, 0.0, float(out_w - 1)))
+        cy1 = float(np.clip(cy1, 0.0, float(out_h - 1)))
+        cx2 = float(np.clip(cx2, 0.0, float(out_w - 1)))
+        cy2 = float(np.clip(cy2, 0.0, float(out_h - 1)))
+        face_out["bbox_xyxy"] = [cx1, cy1, cx2, cy2]
+
+    return face_out
+
+
 class ImageAugmenter:
     def __init__(self, cfg: AugmentConfig, *, seed: int | None = None):
         self.cfg = cfg
         self.base_seed = seed
 
-    def __call__(self, img_pil: Image.Image, face: dict | None = None) -> Image.Image:
+    def __call__(self, img_pil: Image.Image, face: dict | None = None):
         rgb = np.asarray(img_pil.convert("RGB"))
-        rgb_aug, _applied = self.augment_rgb_uint8(rgb, face)
-        return Image.fromarray(rgb_aug, mode="RGB")
+
+        rgb_aug, _applied, H_acc = self.augment_rgb_uint8(rgb, face)
+
+        Hh, Ww = rgb_aug.shape[:2]
+        face_aug = _transform_face_meta(face, H_acc, Ww, Hh)
+
+        return Image.fromarray(rgb_aug, mode="RGB"), face_aug
 
     def augment_rgb_uint8(self, rgb: np.ndarray, face: dict | None):
         ind = self.cfg.independent
@@ -105,4 +150,4 @@ class ImageAugmenter:
             rgb = jpeg_compress(rgb, ind.jpeg_qmin, ind.jpeg_qmax)
             applied.append("JPEG")
 
-        return rgb, applied
+        return rgb, applied, H_acc

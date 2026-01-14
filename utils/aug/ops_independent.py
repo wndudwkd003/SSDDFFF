@@ -28,8 +28,8 @@ class IndependentAugConfig:
     # keypoint occlusion
     occ_enable: bool = True
     occ_p: float = 0.5
-    occ_area_frac_min: float = 0.015
-    occ_area_frac_max: float = 0.06
+    occ_area_frac_min: float = 0.01
+    occ_area_frac_max: float = 0.04
     occ_ar_min: float = 0.4
     occ_ar_max: float = 2.0
     occ_num_rects: int = 1

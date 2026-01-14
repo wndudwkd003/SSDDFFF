@@ -14,16 +14,19 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from config.config import Config, InputFeature
-from utils.data_utils import (
-    _npr_from_rgb01,
-    _residual_from_rgb01,
-    _wavelet_from_rgb01,
-)
+
 from pathlib import Path
 import random
 import torch
 import torch.nn.functional as F
 from PIL import Image
+
+from config.config import Config, InputFeature
+from utils.feature_utils import (
+    _npr_from_rgb01,
+    _residual_from_rgb01,
+    _wavelet_from_rgb01,
+)
 
 
 def _to_uint8_01(x01: torch.Tensor) -> np.ndarray:

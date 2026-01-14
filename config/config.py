@@ -31,34 +31,64 @@ class DatasetName(Enum):
     VFBR = "VFBR"
     RVF_FULL = "RVF_Full"
     FFPP_C23 = "FFPP_C23"
+    DF40_EFS = "DF40_EFS"
+    DF40_FE = "DF40_FE"
+    DF40_FR = "DF40_FR"
+    DF40_FS = "DF40_FS"
 
 
 SELECTED_DATASES = [
-    (DatasetName.DF40, 1.0),
+    (DatasetName.DF40_EFS, 1.0),
+    (DatasetName.DF40_FE, 1.0),
+    (DatasetName.DF40_FR, 1.0),
+    (DatasetName.DF40_FS, 1.0),
 ]
+
+
+EVALUATE_DATASES = [
+    (DatasetName.DF40_EFS, 1.0),
+    (DatasetName.DF40_FE, 1.0),
+    (DatasetName.DF40_FR, 1.0),
+    (DatasetName.DF40_FS, 1.0),
+]
+
 
 # SELECTED_DATASES = [
 #     (DatasetName.FFPP_C23, 1.0),
 # ]
 
+# EVALUATE_DATASES = [
+#     (DatasetName.REAL, 1.0),
+#     (DatasetName.DF40, 1.0),
+#     (DatasetName.KODF, 1.0),
+#     (DatasetName.CELEB_A_FAKE, 1.0),
+#     (DatasetName.TIMIT_RVF, 1.0),
+#     (DatasetName.VFBR, 1.0),
+#     (DatasetName.FFPP_C23, 1.0),
+# ]
 
-EVALUATE_DATASES = [
-    (DatasetName.REAL, 1.0),
-    (DatasetName.DF40, 1.0),
-    (DatasetName.KODF, 1.0),
-    (DatasetName.CELEB_A_FAKE, 1.0),
-    (DatasetName.TIMIT_RVF, 1.0),
-    (DatasetName.VFBR, 1.0),
-    (DatasetName.FFPP_C23, 1.0),
+
+class InputPatchType(Enum):
+    CENTER_ZOOM = "center_zoom"
+    OUTTER_FEATURE_ZOOM = "outter_feature_zoom"
+
+
+INPUT_PATCHES = [
+    # InputPatchType.CENTER_ZOOM,
+    # InputPatchType.OUTTER_FEATURE_ZOOM,
 ]
+
+# /workspace/df40/df40_weights/train_on_df40/clip_large.pth
 
 
 @dataclass
 class Config:
     DEBUG_MODE: bool = False  # True | False
-    model_mode: str = "ae"  # "ce" | "ae"
+    model_mode: str = "ce"  # "ce" | "ae"
     ae_normal: Literal["real", "fake"] = "fake"
+    input_patches: list[InputPatchType] = field(default_factory=lambda: INPUT_PATCHES)
 
+    input_patch_preview_max_items: int = 8
     do_mode: str = "train"  # train | test
     use_dataset_sum: bool = False  # True | False
     test_dir: str | None = None
@@ -84,27 +114,27 @@ class Config:
         ]
     )
     input_channels: int = -1
-    use_augmentation: bool = True
+    # use_augmentation: bool = False
     SSDDFF: bool = False
     SSDDFF_mode: str = "stage1_convnextv2_train"
-    run_name: str = ModelName.XCEPTION_AE.name
-    model_name: ModelName = ModelName.XCEPTION_AE
+    run_name: str = ModelName.CLIP_VIT_LARGE_224.name
+    model_name: ModelName = ModelName.CLIP_VIT_LARGE_224
     num_classes: int = 2
     image_size: int = 224
     probs_threshold: float = 0.5
     skip_stage1: bool = False
     head: str = "linear"
     freeze_backbone: bool = False
-    pretrained: bool = False
+    pretrained: bool = True
     pretrained_ckpt_path: str | None = (
-        "runs/20260112_031533_XCEPTION_224/SUM/best_stage1.pth"
+        "/workspace/df40/df40_weights/train_on_df40/clip_large.pth"
     )
-    num_epochs: int = 50
-    batch_size: int = 64
-    lr: float = 1e-3
-    weight_decay: float = 1e-4
+    num_epochs: int = 5
+    batch_size: int = 16
+    lr: float = 1e-4
+    weight_decay: float = 1e-5
     scheduler: str = "cosine"
-    early_stopping_patience: int | None = 5
+    early_stopping_patience: int | None = 2
     early_stopping_delta: float = 1e-4
     out_dir: str = "out"
     run_dir: str = "runs"

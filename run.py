@@ -10,6 +10,7 @@ from worker.train import Trainer
 from worker.submit import submit_predictions
 from worker.analysis import Analyzer, build_cross_dataset_grids
 from utils.date_utils import get_current_timestamp
+from utils.save_config import save_config
 
 
 def get_input_ch(input_features: list[InputFeature]) -> int:
@@ -28,12 +29,15 @@ def get_input_ch(input_features: list[InputFeature]) -> int:
 
 def main(config: Config):
     if config.do_mode == "train":
+
         analyzer = Analyzer()
 
         ts = get_current_timestamp()
         base_name = f"{ts}_{config.run_name}_{config.image_size}"
         base_run_dir = Path(config.run_dir) / base_name
         base_run_dir.mkdir(parents=True, exist_ok=True)
+
+        save_config(config, base_run_dir)
 
         if config.use_dataset_sum:
             run_dir = base_run_dir / DatasetName.SUM.value
