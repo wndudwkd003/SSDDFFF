@@ -27,79 +27,43 @@ def save_input_patch_preview_folder(
     loader,
     out_dir: Path,
     config: Config,
-    *,
-    epoch: int,
     max_items: int = 16,
-    overwrite_each_epoch: bool = True,
 ):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    cols = len(config.input_features) + 1  # INPUT_RGB + features
+    cols = len(config.input_features) + 1
     saved = 0
 
     for batch in loader:
-        # --- Case A) patch preview exists ---
-        if "debug_patch_rgb01" in batch and "debug_patch_names" in batch:
-            patch_rgb01 = batch["debug_patch_rgb01"]  # (B,P,3,H,W)
-            patch_names = batch["debug_patch_names"][0]  # list[str]
+        if saved >= max_items:
+            break
 
-            B, P = patch_rgb01.shape[0], patch_rgb01.shape[1]
-
-            for i in range(B):
-                if saved >= max_items:
-                    return {"saved": saved, "out_dir": str(out_dir)}
-
-                blocks: list[Image.Image] = []
-                for p in range(P):
-                    pil_patch = to_pil_image(patch_rgb01[i, p])
-                    feats = render_feature_images(pil_patch, config)
-                    feats = {"INPUT_RGB": pil_patch, **feats}
-
-                    grid = compose_feature_grid(
-                        feats,
-                        tile_size=int(config.image_size),
-                        cols=cols,
-                        pad=8,
-                        bg=(0, 0, 0),
-                    )
-                    blocks.append(grid)
-
-                # 세로 결합
-                gap = 14
-                W = max(im.size[0] for im in blocks)
-                H = sum(im.size[1] for im in blocks) + gap * (len(blocks) - 1)
-                panel = Image.new("RGB", (W, H), (0, 0, 0))
-
-                y0 = 0
-                for im in blocks:
-                    panel.paste(im, (0, y0))
-                    y0 += im.size[1] + gap
-
-                fn = (
-                    f"idx{saved:03d}.png"
-                    if overwrite_each_epoch
-                    else f"epoch{epoch:04d}_idx{saved:03d}_{np.random.randint(0,10**9):09d}.png"
-                )
-                out_path = out_dir / fn
-                tmp = out_path.with_name(f"{out_path.stem}.tmp{out_path.suffix}")
-                panel.save(tmp)
-                os.replace(tmp, out_path)
-
-                saved += 1
-
-        # --- Case B) no patches: fallback to actual model input ---
+        if "debug_patch_rgb01" in batch:
+            patch_rgb01 = batch["debug_patch_rgb01"]
+            if patch_rgb01.dim() == 4:
+                patch_rgb01 = patch_rgb01.unsqueeze(1)
         elif "debug_input_rgb01" in batch:
-            inp_rgb01 = batch["debug_input_rgb01"]  # (B,3,H,W)
-            B = inp_rgb01.shape[0]
+            patch_rgb01 = batch["debug_input_rgb01"]
+            if patch_rgb01.dim() == 3:
+                patch_rgb01 = patch_rgb01.unsqueeze(0)
+            patch_rgb01 = patch_rgb01.unsqueeze(1)
+        else:
+            continue
 
-            for i in range(B):
-                if saved >= max_items:
-                    return {"saved": saved, "out_dir": str(out_dir)}
+        B, P = int(patch_rgb01.shape[0]), int(patch_rgb01.shape[1])
 
-                pil_in = to_pil_image(inp_rgb01[i])
-                feats = render_feature_images(pil_in, config)
-                feats = {"INPUT_RGB": pil_in, **feats}
+        for i in range(B):
+            if saved >= max_items:
+                break
+
+            blocks: list[Image.Image] = []
+
+            for p in range(P):
+                pil_patch = to_pil_image(patch_rgb01[i, p])
+
+                feats = render_feature_images(pil_patch, config)
+                feats = {"INPUT_RGB": pil_patch, **feats}
 
                 grid = compose_feature_grid(
                     feats,
@@ -108,24 +72,30 @@ def save_input_patch_preview_folder(
                     pad=8,
                     bg=(0, 0, 0),
                 )
+                blocks.append(grid)
 
-                fn = (
-                    f"idx{saved:03d}.png"
-                    if overwrite_each_epoch
-                    else f"epoch{epoch:04d}_idx{saved:03d}_{np.random.randint(0,10**9):09d}.png"
-                )
-                out_path = out_dir / fn
-                tmp = out_path.with_name(f"{out_path.stem}.tmp{out_path.suffix}")
-                grid.save(tmp)
-                os.replace(tmp, out_path)
+            gap = 14
+            W = max(im.size[0] for im in blocks) if blocks else int(config.image_size)
+            H = (
+                sum(im.size[1] for im in blocks) + gap * (len(blocks) - 1)
+                if blocks
+                else int(config.image_size)
+            )
+            panel = Image.new("RGB", (W, H), (0, 0, 0))
 
-                saved += 1
+            y0 = 0
+            for im in blocks:
+                panel.paste(im, (0, y0))
+                y0 += im.size[1] + gap
 
-        else:
-            # 디버그 텐서가 없다면 그냥 스킵(데이터셋 쪽에서 debug_input_rgb01은 항상 넣는 게 정상)
-            continue
+            out_path = out_dir / f"idx{saved:03d}.png"
+            tmp = out_path.with_name(f"{out_path.stem}.tmp{out_path.suffix}")
+            panel.save(tmp)
+            os.replace(tmp, out_path)
 
-    return {"saved": saved, "out_dir": str(out_dir)}
+            saved += 1
+
+    return {"saved": int(saved), "out_dir": str(out_dir)}
 
 
 @torch.no_grad()
@@ -334,6 +304,13 @@ def train_ce(
     last_train = None
     last_valid = None
 
+    save_input_patch_preview_folder(
+        loader=train_loader,
+        out_dir=input_patch_preview_dir,
+        config=config,
+        max_items=config.input_patch_preview_max_items,
+    )
+
     for epoch in range(config.num_epochs):
         last_train = run_epoch_ce(
             epoch=epoch + 1,
@@ -360,15 +337,6 @@ def train_ce(
         train_losses.append(float(last_train["loss"]))
         valid_losses.append(float(last_valid["loss"]))
         update_loss_curve_image(train_losses, valid_losses, loss_curve_path)
-
-        save_input_patch_preview_folder(
-            loader=train_loader,
-            out_dir=input_patch_preview_dir,
-            config=config,
-            epoch=epoch + 1,
-            max_items=config.input_patch_preview_max_items,
-            overwrite_each_epoch=True,
-        )
 
         v = float(last_valid["loss"])
         if v < best_valid_loss:

@@ -109,7 +109,7 @@ class Config:
     input_features: list[InputFeature] = field(
         default_factory=lambda: [
             InputFeature.RGB,
-            InputFeature.NPR,
+            # InputFeature.NPR,
             InputFeature.WAVELET,
         ]
     )

@@ -44,8 +44,5 @@ def save_config(config: Config, run_dir: Path) -> None:
     data = asdict(config) if is_dataclass(config) else vars(config)
     data = _convert(data)
 
-    with open(run_dir / "config.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
     with open(run_dir / "config.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
