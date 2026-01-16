@@ -12,14 +12,8 @@ from torchvision import transforms as T
 
 from config.config import Config, DatasetName
 from utils.aug.augmenter import ImageAugmenter, AugmentConfig
-from utils.patch_utils import build_input_tensor_with_patches
-from utils.patch_utils import (
-    build_input_tensor_with_patches,
-    make_patch_pils,
-    select_input_pil,
-)
+from utils.patch_utils import apply_input_patch
 
-from utils.patch_utils import make_patch_pils
 from utils.feature_utils import build_input_tensor
 
 
@@ -90,7 +84,15 @@ class DF_Dataset_JSON(Dataset):
         self.split = split
 
         self.augmenter = None
-        if split == "train":
+
+        print(f"Total samples in {split} set: {len(rows)}")
+        print(f"Label 0 count: {sum(1 for r in rows if r['label'] == 0)}")
+        print(f"Label 1 count: {sum(1 for r in rows if r['label'] == 1)}")
+
+        print(
+            f"Current split is {split}, User augmentation: {config.use_augmentation}."
+        )
+        if split == "train" and config.use_augmentation:
             self.augmenter = ImageAugmenter(AugmentConfig(), seed=config.seed)
 
         self._dbg_tfm = T.Compose(
@@ -110,34 +112,26 @@ class DF_Dataset_JSON(Dataset):
         row = self.rows[idx]
 
         path = row["path"]
-        y = int(row["label"])
+        y = row["label"]
+
+        if self.config.data_label_invert:
+            y = 1 - y
 
         img = Image.open(path).convert("RGB")
-        face = row.get("face", None)
+        face = row["face"]
 
         if self.augmenter is not None:
             img, face = self.augmenter(img, face)
 
-        pil_in, pil_in_name = select_input_pil(img, face, self.config, split=self.split)
-        x = build_input_tensor(pil_in, self.config)
+        prev_x = apply_input_patch(img, face, self.config)
+        x = build_input_tensor(prev_x, self.config)
 
         out = {
             "pixel_values": x,
             "labels": torch.tensor(y, dtype=torch.long),
             "path": str(path),
             "face": face,
-            "debug_input_rgb01": self._dbg_tfm(pil_in.convert("RGB")),
-            "debug_input_name": str(pil_in_name),
         }
-
-        patch_pils = make_patch_pils(img, face, self.config)
-        if len(patch_pils) == 0:
-            out["debug_patch_rgb01"] = out["debug_input_rgb01"].unsqueeze(0)
-            out["debug_patch_names"] = [out["debug_input_name"]]
-        else:
-            patch_tensors = [self._dbg_tfm(pil.convert("RGB")) for _, pil in patch_pils]
-            out["debug_patch_rgb01"] = torch.stack(patch_tensors, dim=0)
-            out["debug_patch_names"] = [name for name, _ in patch_pils]
 
         return out
 
@@ -217,14 +211,14 @@ def get_test_loader_submission(config: Config):
 
 
 def get_data_loader(
-    config: Config, split: str, dataset_name: DatasetName | None = None
+    config: Config, split: str | None = None, dataset_name: DatasetName | None = None
 ):
-    if config.do_mode == "train":
+    if config.do_mode in ["train", "test"]:
         if split in ["train", "valid"]:
             return get_train_loader(config, split, dataset_name)
 
         elif split == "test":
             return get_test_loader_jsonl(config, dataset_name)
 
-    if config.do_mode == "test":
+    if config.do_mode == "test_submission":
         return get_test_loader_submission(config)

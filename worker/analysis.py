@@ -15,6 +15,49 @@ from sklearn.metrics import (
 )
 
 
+def _confusion_counts(y_true, y_pred):
+    # binary 가정 (0/1)
+    tp = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 1 and yp == 1)
+    tn = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 0 and yp == 0)
+    fp = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 0 and yp == 1)
+    fn = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 1 and yp == 0)
+    return tp, tn, fp, fn
+
+
+def compute_labelwise_metrics(res: dict):
+    """
+    라벨별 '정확도'를 별도로 산출.
+    - acc_label1: 라벨1(positive) 샘플에서의 정확도 = TP / (TP+FN) = TPR(=Recall for label1)
+    - acc_label0: 라벨0(negative) 샘플에서의 정확도 = TN / (TN+FP) = TNR(Specificity)
+    - balanced_acc: (acc_label0 + acc_label1) / 2
+    """
+    y_true = res["labels"]
+    y_pred = res["preds"]
+
+    tp, tn, fp, fn = _confusion_counts(y_true, y_pred)
+
+    denom1 = tp + fn  # 실제 라벨 1 개수
+    denom0 = tn + fp  # 실제 라벨 0 개수
+
+    acc_label1 = float(tp / denom1) if denom1 > 0 else 0.0
+    acc_label0 = float(tn / denom0) if denom0 > 0 else 0.0
+    balanced_acc = (
+        float((acc_label0 + acc_label1) / 2.0) if (denom0 > 0 and denom1 > 0) else 0.0
+    )
+
+    return {
+        "num_pos": int(denom1),
+        "num_neg": int(denom0),
+        "tp": int(tp),
+        "tn": int(tn),
+        "fp": int(fp),
+        "fn": int(fn),
+        "acc_label1": acc_label1,
+        "acc_label0": acc_label0,
+        "balanced_acc": balanced_acc,
+    }
+
+
 def compute_metrics(res: dict):
     y_true = res["labels"]
     y_pred = res["preds"]
@@ -82,6 +125,31 @@ def save_csv(path: Path, header, rows):
         out_lines.append(",".join("" if v is None else str(v) for v in r))
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(out_lines) + "\n")
+
+
+def plot_labelwise_bars(per_ds: dict, order: list, out_path: Path, title: str):
+    ds_list = [ds for ds in order if ds in per_ds]
+    acc0 = [float(per_ds[ds]["acc_label0"]) for ds in ds_list]
+    acc1 = [float(per_ds[ds]["acc_label1"]) for ds in ds_list]
+    bacc = [float(per_ds[ds]["balanced_acc"]) for ds in ds_list]
+
+    x = np.arange(len(ds_list))
+    w = 0.25
+
+    fig, ax = plt.subplots(figsize=(max(8, 0.8 * len(ds_list)), 4.5))
+    ax.bar(x - w, acc0, width=w, label="acc_label0(TNR)")
+    ax.bar(x, acc1, width=w, label="acc_label1(TPR)")
+    ax.bar(x + w, bacc, width=w, label="balanced_acc")
+
+    ax.set_ylim(0.0, 1.0)
+    ax.set_xticks(x)
+    ax.set_xticklabels(ds_list, rotation=30, ha="right")
+    ax.set_ylabel("Accuracy")
+    ax.set_title(title)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=200)
+    plt.close(fig)
 
 
 def plot_heatmap(mat, row_labels, col_labels, out_path: Path, title: str):
@@ -240,6 +308,9 @@ class Analyzer:
                 m = compute_metrics(res)
                 row.update(m)
 
+                lm = compute_labelwise_metrics(res)
+                row.update(lm)
+
                 if "probs" in res:
                     row.update(prob_stats(res["probs"], thr=0.5))
                     csv_rows.append(
@@ -251,6 +322,11 @@ class Analyzer:
                             row["recall"],
                             row["f1"],
                             row["roc_auc"],
+                            row["acc_label0"],
+                            row["acc_label1"],
+                            row["balanced_acc"],
+                            row["num_pos"],
+                            row["num_neg"],
                             row["num_samples"],
                             row["mean_prob"],
                             row["fake_ratio"],
@@ -268,6 +344,11 @@ class Analyzer:
                             row["recall"],
                             row["f1"],
                             row["roc_auc"],
+                            row["acc_label0"],
+                            row["acc_label1"],
+                            row["balanced_acc"],
+                            row["num_pos"],
+                            row["num_neg"],
                             row["num_samples"],
                             row["mean_score"],
                             row["fake_ratio"],
@@ -280,8 +361,10 @@ class Analyzer:
             save_json(cross_json, per_ds)
 
             cross_csv = run_dir / f"cross_test_{train_ds}.csv"
-            if len(csv_rows) > 0 and len(csv_rows[0]) == 10:
-                # CE
+
+            is_ce = any(("probs" in tests_all[ds]) for ds in order if ds in tests_all)
+
+            if is_ce:
                 save_csv(
                     cross_csv,
                     header=[
@@ -292,6 +375,11 @@ class Analyzer:
                         "recall",
                         "f1",
                         "roc_auc",
+                        "acc_label0",
+                        "acc_label1",
+                        "balanced_acc",
+                        "num_pos",
+                        "num_neg",
                         "num_samples",
                         "mean_prob",
                         "fake_ratio",
@@ -299,7 +387,6 @@ class Analyzer:
                     rows=csv_rows,
                 )
             else:
-                # AE
                 save_csv(
                     cross_csv,
                     header=[
@@ -310,6 +397,11 @@ class Analyzer:
                         "recall",
                         "f1",
                         "roc_auc",
+                        "acc_label0",
+                        "acc_label1",
+                        "balanced_acc",
+                        "num_pos",
+                        "num_neg",
                         "num_samples",
                         "mean_score",
                         "fake_ratio",
@@ -317,6 +409,7 @@ class Analyzer:
                     rows=csv_rows,
                 )
 
+            # 기존 metrics heatmap (그대로 유지)
             metric_keys = ["accuracy", "precision", "recall", "f1", "roc_auc"]
             col_labels = [ds for ds in order if ds in per_ds]
 
@@ -332,6 +425,29 @@ class Analyzer:
                 col_labels=col_labels,
                 out_path=heatmap_path,
                 title=f"Cross-Dataset Test Heatmap (train={train_ds})",
+            )
+
+            # 라벨별 accuracy heatmap 추가
+            label_metric_keys = ["acc_label0", "acc_label1", "balanced_acc"]
+            mat2 = np.full(
+                (len(label_metric_keys), len(col_labels)), np.nan, dtype=float
+            )
+            for j, ds in enumerate(col_labels):
+                for i, mk in enumerate(label_metric_keys):
+                    mat2[i, j] = float(per_ds[ds][mk])
+
+            heatmap_path2 = run_dir / f"cross_test_heatmap_labelwise_{train_ds}.png"
+            plot_heatmap(
+                mat=mat2,
+                row_labels=label_metric_keys,
+                col_labels=col_labels,
+                out_path=heatmap_path2,
+                title=f"Cross-Dataset Labelwise Acc Heatmap (train={train_ds})",
+            )
+
+            bar_path = run_dir / f"cross_test_labelwise_bars_{train_ds}.png"
+            plot_labelwise_bars(
+                per_ds, order, bar_path, title=f"Labelwise Acc Bars (train={train_ds})"
             )
 
         else:

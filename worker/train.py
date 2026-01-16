@@ -47,16 +47,7 @@ class Trainer:
         self.recon_loss: ReconLoss | None = None
         self.threshold: float | None = None
 
-        if config.do_mode == "test":
-            self.run_dir = Path(config.test_dir)
-        else:
-            if run_dir is None:
-                ts = get_current_timestamp()
-                name = f"{ts}_{config.run_name}_{config.image_size}"
-                self.run_dir = Path(config.run_dir) / name
-            else:
-                self.run_dir = run_dir
-            self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.run_dir = run_dir
 
         if config.pretrained and config.pretrained_ckpt_path is not None:
             ckpt = torch.load(config.pretrained_ckpt_path, map_location="cpu")
@@ -65,12 +56,15 @@ class Trainer:
         if config.model_mode == "ae":
             self.recon_loss = ReconLoss(w_l1=1.0, w_mse=0.0, w_ssim=0.0)
 
-        if config.do_mode == "test":
+        if config.do_mode == "test_submission":
             self._load_for_test()
 
         self.model.to(self.device)
 
     def _load_for_test(self) -> None:
+        print(f"[train.py] Here is test submission mode and loading pretrained model.")
+        print(f"[train.py] Pretrained ckpt path: {self.config.pretrained_ckpt_path}")
+
         if self.config.pretrained_ckpt_path is None:
             raise ValueError(
                 f"[train.py] 현재 테스트 모드이므로 가중치 경로와 모델 모드를 확인하세요."
@@ -151,7 +145,7 @@ class Trainer:
         }
 
     def test_for_submission(self):
-        loader = get_data_loader(self.config, "test")
+        loader = get_data_loader(self.config)
 
         if self.config.model_mode == "ae":
             scores, filenames, media_types = collect_meta_scores_from_ae(
@@ -181,7 +175,7 @@ class Trainer:
             }
 
         probs, filenames, media_types = collect_meta_probs_from_model(
-            self.model, loader, self.device
+            self.model, loader, self.device, self.config.logits_invert
         )
 
         out_fns, out_probs, per_file_probs = aggregate_per_file(

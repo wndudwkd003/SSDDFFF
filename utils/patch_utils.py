@@ -1,30 +1,24 @@
 # utils/patch_utils.py
 
+from __future__ import annotations
+
+import hashlib
+from typing import List, Tuple
+
 from PIL import Image
 import torch
-
-from config.config import InputPatchType
-from config.config import Config
-from utils.feature_utils import build_input_tensor
-
-
 from torchvision import transforms as T
 
+from config.config import Config, InputPatchType
 
-def _face_box_from_meta(face: dict | None, w: int, h: int):
-    if face is None:
-        return (0, 0, w, h)
 
-    if "bbox_xyxy" in face:
-        x1, y1, x2, y2 = face["bbox_xyxy"]
-    else:
-        kps = face.get("kps_5", None)
-        if kps is None:
-            return (0, 0, w, h)
-        xs = [p[0] for p in kps]
-        ys = [p[1] for p in kps]
-        x1, x2 = min(xs), max(xs)
-        y1, y2 = min(ys), max(ys)
+def _face_box_from_meta(face: dict, w: int, h: int) -> Tuple[int, int, int, int]:
+    """
+    전제:
+    - face는 항상 존재
+    - face["bbox_xyxy"]는 항상 존재
+    """
+    x1, y1, x2, y2 = face["bbox_xyxy"]
 
     x1 = max(0, int(round(float(x1))))
     y1 = max(0, int(round(float(y1))))
@@ -33,81 +27,59 @@ def _face_box_from_meta(face: dict | None, w: int, h: int):
     return x1, y1, x2, y2
 
 
-def _crop_center_zoom_pil(
-    pil0: Image.Image,
-    face: dict | None,
+def _resize_center_crop(pil: Image.Image, out_size: int) -> Image.Image:
+    tfm = T.Compose(
+        [
+            T.Resize(out_size, interpolation=T.InterpolationMode.BICUBIC),
+            T.CenterCrop(out_size),
+        ]
+    )
+    return tfm(pil.convert("RGB"))
+
+
+def _crop_bbox_B(
+    pilA: Image.Image,
+    face: dict,
     *,
     out_size: int,
     pad_frac: float = 0.25,
-    zoom_scale: float = 2.2,
 ) -> Image.Image:
     """
-    질문에서 말한 CENTER_ZOOM: bbox 바깥을 잘라내고 bbox 내부를 확대해서 out_size 정사각형으로 만듦.
+    B: bbox 기반 crop(+pad) -> out_size로 resize
     """
-    if face is None:
-        # face 정보 없으면 그냥 중앙 crop로 대체
-        return T.Compose(
-            [
-                T.Resize(out_size, interpolation=T.InterpolationMode.BICUBIC),
-                T.CenterCrop(out_size),
-            ]
-        )(pil0.convert("RGB"))
-
-    w, h = pil0.size
+    w, h = pilA.size
     x1, y1, x2, y2 = _face_box_from_meta(face, w, h)
 
     bw = max(1.0, float(x2 - x1))
     bh = max(1.0, float(y2 - y1))
-    pad = float(pad_frac)
 
-    x1 = int(max(0, round(x1 - bw * pad)))
-    y1 = int(max(0, round(y1 - bh * pad)))
-    x2 = int(min(w, round(x2 + bw * pad)))
-    y2 = int(min(h, round(y2 + bh * pad)))
+    x1p = int(max(0, round(x1 - bw * pad_frac)))
+    y1p = int(max(0, round(y1 - bh * pad_frac)))
+    x2p = int(min(w, round(x2 + bw * pad_frac)))
+    y2p = int(min(h, round(y2 + bh * pad_frac)))
 
-    crop = pil0.crop((x1, y1, x2, y2))
-
-    zoom_side = int(round(out_size * float(zoom_scale)))
-    zoom_side = max(zoom_side, out_size)
-    crop = crop.resize((zoom_side, zoom_side), resample=Image.BICUBIC)
-
-    cx = zoom_side // 2
-    cy = zoom_side // 2
-    half = out_size // 2
-    crop = crop.crop((cx - half, cy - half, cx - half + out_size, cy - half + out_size))
-    return crop
+    crop = pilA.crop((x1p, y1p, x2p, y2p))
+    return crop.resize((out_size, out_size), resample=Image.BICUBIC)
 
 
-def _crop_kp_part_pil(
-    pil0: Image.Image,
-    face: dict | None,
+def _crop_kp_tile(
+    pilA: Image.Image,
+    face: dict,
     kp_idx: int,
     *,
-    out_size: int,
+    tile_size: int,
     kp_pad_frac: float = 0.18,
 ) -> Image.Image:
     """
-    keypoint 주변 패치 crop.
-    - face bbox 크기 기반으로 keypoint 주변을 잘라 out_size 정사각형으로 리사이즈
+    A에서 keypoint 주변 crop 타일 생성.
+
+    전제:
+    - face["kps_5"]는 항상 존재
+    - len(face["kps_5"]) == 5
     """
-    if face is None:
-        return T.Compose(
-            [
-                T.Resize(out_size, interpolation=T.InterpolationMode.BICUBIC),
-                T.CenterCrop(out_size),
-            ]
-        )(pil0.convert("RGB"))
+    kps = face["kps_5"]
 
-    kps = face.get("kps_5", None)
-    if kps is None or len(kps) != 5:
-        return T.Compose(
-            [
-                T.Resize(out_size, interpolation=T.InterpolationMode.BICUBIC),
-                T.CenterCrop(out_size),
-            ]
-        )(pil0.convert("RGB"))
-
-    w, h = pil0.size
+    w, h = pilA.size
     x1, y1, x2, y2 = _face_box_from_meta(face, w, h)
     bw = max(1.0, float(x2 - x1))
     bh = max(1.0, float(y2 - y1))
@@ -118,74 +90,72 @@ def _crop_kp_part_pil(
     py = float(py)
 
     half = 0.5 * base * float(kp_pad_frac)
+
     cx1 = int(max(0, round(px - half)))
     cy1 = int(max(0, round(py - half)))
     cx2 = int(min(w, round(px + half)))
     cy2 = int(min(h, round(py + half)))
 
+    # 전제상 거의 없겠지만, 최소한의 안전 처리
     if cx2 <= cx1 + 1 or cy2 <= cy1 + 1:
-        return T.Compose(
-            [
-                T.Resize(out_size, interpolation=T.InterpolationMode.BICUBIC),
-                T.CenterCrop(out_size),
-            ]
-        )(pil0.convert("RGB"))
+        return _resize_center_crop(pilA, tile_size)
 
-    crop = pil0.crop((cx1, cy1, cx2, cy2))
-    crop = crop.resize((out_size, out_size), resample=Image.BICUBIC)
-    return crop
+    crop = pilA.crop((cx1, cy1, cx2, cy2))
+    return crop.resize((tile_size, tile_size), resample=Image.BICUBIC)
 
 
-def _make_outter_feature_zoom_pil(
-    pil0: Image.Image,
-    face: dict | None,
+def _stable_sample_seed(config_seed: int, path: str) -> int:
+    """
+    샘플별로 랜덤이 달라지되 재현 가능하도록 seed 구성.
+    """
+    h = hashlib.md5(path.encode("utf-8")).hexdigest()
+    v = int(h[:8], 16)  # 32-bit
+    return int(config_seed) ^ v
+
+
+def _make_k_tiles_8(
+    pilA: Image.Image,
+    face: dict,
     *,
-    out_size: int,
+    tile_size: int,
     seed: int,
-    kp_pad_frac: float = 0.18,
-    center_pad_frac: float = 0.25,
-    center_zoom_scale: float = 2.2,
-) -> Image.Image:
+) -> List[Image.Image]:
     """
-    OUTTER_FEATURE_ZOOM:
-    - 3x3 모자이크(정사각형)
-      * center(1칸): CENTER_ZOOM
-      * outer ring(8칸): 5 keypoint crop을 복사/반복해 채움 (8칸 필요 -> 3칸 중복)
+    K1~K8 생성:
+    - kp 5개는 고정(kp_idx 0..4)
+    - 추가 3개는 0..4 중 랜덤(중복 허용)
     """
-    # 3x3 tile
-    grid = 3
-    tile = out_size // grid
-    canvas = Image.new("RGB", (tile * grid, tile * grid))
+    base = [_crop_kp_tile(pilA, face, k, tile_size=tile_size) for k in range(5)]
 
-    # center
-    center_pil = _crop_center_zoom_pil(
-        pil0,
-        face,
-        out_size=tile,
-        pad_frac=center_pad_frac,
-        zoom_scale=center_zoom_scale,
-    )
-
-    # outer 8 tiles: kp(0~4) + 3 repeats
     g = torch.Generator()
     g.manual_seed(int(seed))
-
-    # 기본 5개 kp
-    kp_tiles = []
-    for k in range(5):
-        kp_tiles.append(
-            _crop_kp_part_pil(pil0, face, k, out_size=tile, kp_pad_frac=kp_pad_frac)
-        )
-
-    # 8칸 채우기 위해 3개 더 뽑기(중복 허용)
-    # face가 없으면 kp_tiles가 사실상 center-crop 기반이므로 그래도 동작은 함.
     extra_idx = torch.randint(low=0, high=5, size=(3,), generator=g).tolist()
-    for ei in extra_idx:
-        kp_tiles.append(kp_tiles[ei].copy())
+    extra = [base[i].copy() for i in extra_idx]
 
-    assert len(kp_tiles) == 8
+    out = base + extra
+    # base 5 + extra 3 = 8
+    return out
 
-    # placement: outer ring positions (row, col)
+
+def _build_3x3_grid(
+    *,
+    center: Image.Image,
+    outer8: List[Image.Image],
+    out_size: int,
+) -> Image.Image:
+    """
+    3x3 타일(콜라주) 한 장 생성.
+
+    배치:
+      K1 K2 K3
+      K4  C K5
+      K6 K7 K8
+    """
+    tile = out_size // 3
+    canvas = Image.new("RGB", (tile * 3, tile * 3))
+
+    cimg = center.resize((tile, tile), resample=Image.BICUBIC)
+
     outer_pos = [
         (0, 0),
         (0, 1),
@@ -197,99 +167,62 @@ def _make_outter_feature_zoom_pil(
         (2, 2),
     ]
 
-    # paste outer
-    for t, (r, c) in zip(kp_tiles, outer_pos):
-        canvas.paste(t, (c * tile, r * tile))
+    for t, (r, c) in zip(outer8, outer_pos):
+        tt = t.resize((tile, tile), resample=Image.BICUBIC)
+        canvas.paste(tt, (c * tile, r * tile))
 
-    # paste center
-    canvas.paste(center_pil, (1 * tile, 1 * tile))
+    canvas.paste(cimg, (tile, tile))
 
-    # out_size가 3으로 나누어 떨어지지 않으면 마지막에 정확히 out_size로 맞춤
+    # out_size가 3으로 나누어 떨어지지 않으면 최종 보정
     if canvas.size != (out_size, out_size):
         canvas = canvas.resize((out_size, out_size), resample=Image.Resampling.BICUBIC)
 
     return canvas
 
 
-def _apply_patch_policy(
-    img_pil: Image.Image, face: dict | None, config: Config, patch: InputPatchType
+def apply_input_patch(
+    imgA: Image.Image,
+    face: dict,
+    config: Config,
+    *,
+    path_for_seed: str,
 ) -> Image.Image:
-    if patch == InputPatchType.CENTER_ZOOM:
-        return _crop_center_zoom_pil(
-            img_pil,
-            face,
-            out_size=config.image_size,
-            pad_frac=0.25,
-            zoom_scale=2.2,
-        )
-
-    if patch == InputPatchType.OUTTER_FEATURE_ZOOM:
-        return _make_outter_feature_zoom_pil(
-            img_pil,
-            face,
-            out_size=config.image_size,
-            seed=config.seed,
-            kp_pad_frac=0.18,
-            center_pad_frac=0.25,
-            center_zoom_scale=2.2,
-        )
-
-    raise ValueError(patch)
-
-
-def select_input_pil(
-    img_pil: Image.Image,
-    face: dict | None,
-    config: Config,
-    *,
-    split: str,
-) -> tuple[Image.Image, str]:
     """
-    모델에 들어가는 '최종 입력 PIL'과 그 이름을 반환.
-    - INPUT_PATCHES 비어있으면: 원본 img_pil 그대로 ("ORIGINAL")
-    - 있으면: 기존 정책대로 선택된 patch PIL ("center_zoom" 등)
-    """
-    if len(config.input_patches) <= 0:
-        return img_pil, "ORIGINAL"
+    최종 입력 이미지 생성 규칙(요구사항 반영):
 
-    if split == "train":
-        g = torch.Generator()
-        g.manual_seed(int(config.seed))
-        idx = int(
-            torch.randint(
-                low=0, high=len(config.input_patches), size=(1,), generator=g
-            ).item()
-        )
-        patch = config.input_patches[idx]
+    1) config.input_patches == []:
+       - 반환: A
+
+    2) CENTER_ZOOM만 포함:
+       - 반환: 3x3 grid
+         center = A
+         outer  = K(A) 8개
+
+    3) CENTER_ZOOM + OUTTER_FEATURE_ZOOM 포함:
+       - 반환: 3x3 grid
+         center = B (bbox crop from A)
+         outer  = K(A) 8개  (kp는 항상 A에서 crop)
+    """
+    patches = list(config.input_patches or [])
+    if len(patches) == 0:
+        return imgA
+
+    has_center = InputPatchType.CENTER_ZOOM in patches
+    has_outer = InputPatchType.OUTTER_FEATURE_ZOOM in patches
+
+    # 요구사항 상 CENTER_ZOOM이 없으면 아무것도 안 함
+    if not has_center:
+        return imgA
+
+    out_size = int(config.image_size)
+    tile_size = out_size // 3
+
+    seed = _stable_sample_seed(config.seed, path_for_seed)
+    k_tiles = _make_k_tiles_8(imgA, face, tile_size=tile_size, seed=seed)
+
+    if has_outer:
+        center = _crop_bbox_B(imgA, face, out_size=tile_size, pad_frac=0.25)  # B
     else:
-        patch = config.input_patches[0]
+        center = _resize_center_crop(imgA, tile_size)  # A
 
-    pil_patch = _apply_patch_policy(img_pil, face, config, patch)
-    return pil_patch, patch.value
-
-
-def build_input_tensor_with_patches(
-    img_pil: Image.Image,
-    face: dict | None,
-    config: Config,
-    *,
-    split: str,
-) -> torch.Tensor:
-    pil_in, _name = select_input_pil(img_pil, face, config, split=split)
-    return build_input_tensor(pil_in, config)
-
-
-def make_patch_pils(
-    img_pil: Image.Image,
-    face: dict | None,
-    config: Config,
-) -> list[tuple[str, Image.Image]]:
-    """
-    config.input_patches 순서대로 패치 PIL들을 생성해서 반환.
-    반환: [(patch_name, patch_pil), ...]
-    """
-    out: list[tuple[str, Image.Image]] = []
-    for patch in config.input_patches:
-        pil_patch = _apply_patch_policy(img_pil, face, config, patch)
-        out.append((patch.value, pil_patch))
-    return out
+    return _build_3x3_grid(center=center, outer8=k_tiles, out_size=out_size)

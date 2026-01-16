@@ -13,13 +13,12 @@ from tqdm.auto import tqdm
 
 import matplotlib.pyplot as plt
 
-from config.config import Config
+from config.config import Config, InputFeature
 from utils.losses import ReconLoss, anomaly_score_l1
 from utils.viz_features import render_feature_images, compose_feature_grid
 from utils.train_utils import build_optim_and_scheduler, update_loss_curve_image
 
 from utils.viz_features import tensor_to_pil_rgb
-from torchvision.transforms.functional import to_pil_image
 
 
 @torch.no_grad()
@@ -29,64 +28,129 @@ def save_input_patch_preview_folder(
     config: Config,
     max_items: int = 16,
 ):
+
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    cols = len(config.input_features) + 1
+    tile = int(config.image_size)  # 각 타일 크기 (큰 사이즈)
+    bg = (0, 0, 0)
+
+    def _feat_ch(f) -> int:
+        if f == InputFeature.RGB:
+            return 3
+        if f == InputFeature.NPR:
+            return 3
+        if f == InputFeature.RESIDUAL:
+            return 1
+        if f == InputFeature.WAVELET:
+            return 4
+        raise ValueError(f"Unknown InputFeature: {f}")
+
+    def _to_uint8_gray(x_hw: torch.Tensor) -> Image.Image:
+        # 시각화 목적: min-max normalize
+        x = x_hw.detach().float().cpu()
+        mn = float(x.min().item())
+        mx = float(x.max().item())
+        if mx - mn < 1e-12:
+            x01 = torch.zeros_like(x)
+        else:
+            x01 = (x - mn) / (mx - mn)
+        u8 = (x01 * 255.0).round().clamp(0, 255).to(torch.uint8).numpy()
+        return Image.fromarray(u8, mode="L")
+
+    def _to_uint8_rgb(x_3hw: torch.Tensor) -> Image.Image:
+        # 시각화 목적: 전체 min-max normalize (색 균형 유지)
+        x = x_3hw.detach().float().cpu()
+        mn = float(x.min().item())
+        mx = float(x.max().item())
+        if mx - mn < 1e-12:
+            x01 = torch.zeros_like(x)
+        else:
+            x01 = (x - mn) / (mx - mn)
+        u8 = (x01 * 255.0).round().clamp(0, 255).to(torch.uint8)  # (3,H,W)
+        u8 = u8.permute(1, 2, 0).numpy()  # (H,W,3)
+        return Image.fromarray(u8, mode="RGB")
+
+    def _fit_tile(im: Image.Image) -> Image.Image:
+        # 타일 크기 강제 통일
+        if im.size != (tile, tile):
+            im = im.resize((tile, tile), resample=Image.BICUBIC)
+        if im.mode != "RGB":
+            im = im.convert("RGB")
+        return im
+
     saved = 0
 
     for batch in loader:
         if saved >= max_items:
             break
 
-        if "debug_patch_rgb01" in batch:
-            patch_rgb01 = batch["debug_patch_rgb01"]
-            if patch_rgb01.dim() == 4:
-                patch_rgb01 = patch_rgb01.unsqueeze(1)
-        elif "debug_input_rgb01" in batch:
-            patch_rgb01 = batch["debug_input_rgb01"]
-            if patch_rgb01.dim() == 3:
-                patch_rgb01 = patch_rgb01.unsqueeze(0)
-            patch_rgb01 = patch_rgb01.unsqueeze(1)
-        else:
+        if "pixel_values" not in batch:
             continue
 
-        B, P = int(patch_rgb01.shape[0]), int(patch_rgb01.shape[1])
+        x = batch["pixel_values"]
+        if not torch.is_tensor(x):
+            continue
+
+        # (B,C,H,W) 보정
+        if x.dim() == 3:
+            x = x.unsqueeze(0)
+        if x.dim() != 4:
+            raise ValueError(f"Expected pixel_values (B,C,H,W), got {tuple(x.shape)}")
+
+        B, C, H, W = map(int, x.shape)
 
         for i in range(B):
             if saved >= max_items:
                 break
 
-            blocks: list[Image.Image] = []
+            xi = x[i]  # (C,H,W)
 
-            for p in range(P):
-                pil_patch = to_pil_image(patch_rgb01[i, p])
+            # feature 순서대로 타일 리스트 구성
+            tiles: list[Image.Image] = []
+            off = 0
 
-                feats = render_feature_images(pil_patch, config)
-                feats = {"INPUT_RGB": pil_patch, **feats}
+            for feat in list(config.input_features):
+                ch = _feat_ch(feat)
+                xj = xi[off : off + ch]  # (ch,H,W)
 
-                grid = compose_feature_grid(
-                    feats,
-                    tile_size=int(config.image_size),
-                    cols=cols,
-                    pad=8,
-                    bg=(0, 0, 0),
-                )
-                blocks.append(grid)
+                if int(xj.shape[0]) != ch:
+                    raise RuntimeError(
+                        f"Channel mismatch: feat={feat}, need={ch}, got={int(xj.shape[0])}, off={off}, C={C}"
+                    )
 
-            gap = 14
-            W = max(im.size[0] for im in blocks) if blocks else int(config.image_size)
-            H = (
-                sum(im.size[1] for im in blocks) + gap * (len(blocks) - 1)
-                if blocks
-                else int(config.image_size)
-            )
-            panel = Image.new("RGB", (W, H), (0, 0, 0))
+                if ch == 3:
+                    im = _to_uint8_rgb(xj)
+                    tiles.append(_fit_tile(im))
+                elif ch == 1:
+                    im = _to_uint8_gray(xj[0])
+                    tiles.append(_fit_tile(im))
+                elif ch == 4:
+                    # WAVELET: 채널별로 4장 “그대로” 나열
+                    for k in range(4):
+                        im = _to_uint8_gray(xj[k])
+                        tiles.append(_fit_tile(im))
+                else:
+                    # 규칙상 없음
+                    im = _to_uint8_gray(xj[0])
+                    tiles.append(_fit_tile(im))
 
-            y0 = 0
-            for im in blocks:
-                panel.paste(im, (0, y0))
-                y0 += im.size[1] + gap
+                off += ch
+
+            # 가로 패널 생성
+            if len(tiles) == 0:
+                continue
+
+            gap = 16  # 타일 간격(가로)
+            panel_w = len(tiles) * tile + (len(tiles) - 1) * gap
+            panel_h = tile
+
+            panel = Image.new("RGB", (panel_w, panel_h), bg)
+
+            x0 = 0
+            for im in tiles:
+                panel.paste(im, (x0, 0))
+                x0 += tile + gap
 
             out_path = out_dir / f"idx{saved:03d}.png"
             tmp = out_path.with_name(f"{out_path.stem}.tmp{out_path.suffix}")
@@ -94,8 +158,6 @@ def save_input_patch_preview_folder(
             os.replace(tmp, out_path)
 
             saved += 1
-
-    return {"saved": int(saved), "out_dir": str(out_dir)}
 
 
 @torch.no_grad()

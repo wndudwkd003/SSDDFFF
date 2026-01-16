@@ -22,7 +22,7 @@ class IndependentAugConfig:
     # jpeg
     jpeg_enable: bool = True
     jpeg_p: float = 0.5
-    jpeg_qmin: int = 80
+    jpeg_qmin: int = 85
     jpeg_qmax: int = 95
 
     # keypoint occlusion

@@ -38,17 +38,17 @@ class DatasetName(Enum):
 
 
 SELECTED_DATASES = [
-    (DatasetName.DF40_EFS, 1.0),
-    (DatasetName.DF40_FE, 1.0),
-    (DatasetName.DF40_FR, 1.0),
+    # (DatasetName.DF40_EFS, 1.0),
+    # (DatasetName.DF40_FE, 1.0),
+    # (DatasetName.DF40_FR, 1.0),
     (DatasetName.DF40_FS, 1.0),
 ]
 
 
 EVALUATE_DATASES = [
-    (DatasetName.DF40_EFS, 1.0),
-    (DatasetName.DF40_FE, 1.0),
-    (DatasetName.DF40_FR, 1.0),
+    # (DatasetName.DF40_EFS, 1.0),
+    # (DatasetName.DF40_FE, 1.0),
+    # (DatasetName.DF40_FR, 1.0),
     (DatasetName.DF40_FS, 1.0),
 ]
 
@@ -81,17 +81,27 @@ INPUT_PATCHES = [
 # /workspace/df40/df40_weights/train_on_df40/clip_large.pth
 
 
+USE_MODEL = ModelName.CLIP_VIT_LARGE_224
+
+
 @dataclass
 class Config:
     DEBUG_MODE: bool = False  # True | False
     model_mode: str = "ce"  # "ce" | "ae"
-    ae_normal: Literal["real", "fake"] = "fake"
+    ae_normal: Literal["real", "fake"] = "real"
     input_patches: list[InputPatchType] = field(default_factory=lambda: INPUT_PATCHES)
-
+    data_label_invert: bool = True  # True | False
+    logits_invert: bool = True  # True | False
     input_patch_preview_max_items: int = 8
-    do_mode: str = "train"  # train | test
+    do_mode: str = "train"  # train | test | test_submission
     use_dataset_sum: bool = False  # True | False
-    test_dir: str | None = None
+    test_dir: str | None = None  # ""
+    pretrained: bool = True
+    pretrained_ckpt_path: (
+        str | None
+    ) = (  # pretrained_ckpt_path "/workspace/df40/df40_weights/train_on_df40/clip_large.pth"
+        "/workspace/df40/df40_weights/train_on_df40/clip_large.pth"
+    )
     seed: int = 42
     datasets_path: str = "datasets"
     selected_datasets: list[tuple[DatasetName, float]] = field(
@@ -110,25 +120,22 @@ class Config:
         default_factory=lambda: [
             InputFeature.RGB,
             # InputFeature.NPR,
-            InputFeature.WAVELET,
+            # InputFeature.WAVELET,
         ]
     )
     input_channels: int = -1
-    # use_augmentation: bool = False
+    use_augmentation: bool = False
     SSDDFF: bool = False
     SSDDFF_mode: str = "stage1_convnextv2_train"
-    run_name: str = ModelName.CLIP_VIT_LARGE_224.name
-    model_name: ModelName = ModelName.CLIP_VIT_LARGE_224
+    run_name: str = USE_MODEL.name
+    model_name: ModelName = USE_MODEL
     num_classes: int = 2
     image_size: int = 224
     probs_threshold: float = 0.5
     skip_stage1: bool = False
-    head: str = "linear"
+    head: str = "mlp"
     freeze_backbone: bool = False
-    pretrained: bool = True
-    pretrained_ckpt_path: str | None = (
-        "/workspace/df40/df40_weights/train_on_df40/clip_large.pth"
-    )
+
     num_epochs: int = 5
     batch_size: int = 16
     lr: float = 1e-4

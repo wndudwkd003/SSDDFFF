@@ -71,8 +71,17 @@ def main(config: Config):
         )
         return
 
-    if config.do_mode == "test":
-        trainer = Trainer(config, train_dataset=None)
+    elif config.do_mode == "test":
+        run_dir = Path(config.test_dir)
+        trainer = Trainer(config, train_dataset=None, run_dir=run_dir)
+        results = trainer.test()
+        analyzer = Analyzer()
+        analyzer.analyze(results, "test_all")
+        return
+
+    elif config.do_mode == "test_submission":
+        run_dir = Path(config.test_dir)
+        trainer = Trainer(config, train_dataset=None, run_dir=run_dir)
         results = trainer.test_for_submission()
         submit_predictions(config, results)
         return

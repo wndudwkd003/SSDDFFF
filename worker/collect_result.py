@@ -61,7 +61,9 @@ def aggregate_per_file(
 
 
 @torch.no_grad()
-def collect_meta_probs_from_model(model: nn.Module, loader, device: torch.device):
+def collect_meta_probs_from_model(
+    model: nn.Module, loader, device: torch.device, invert: bool = True
+):
     model.eval()
 
     prob_list = []
@@ -72,9 +74,12 @@ def collect_meta_probs_from_model(model: nn.Module, loader, device: torch.device
         x = batch["pixel_values"].to(device)
         out = model(x)
         logits = out["logits"]
-        probs = torch.softmax(logits, dim=1)[:, 1]
-        prob_list.extend(probs.detach().cpu().numpy().tolist())
 
+        probs = torch.softmax(logits, dim=1)[:, 1]  # class=1 확률(현재)
+        if invert:
+            probs = 1.0 - probs  # 1 - p 로 저장
+
+        prob_list.extend(probs.detach().cpu().numpy().tolist())
         filename_list.extend(list(batch["filename"]))
         media_type_list.extend(list(batch["media_type"]))
 
