@@ -20,6 +20,14 @@ from utils.train_utils import build_optim_and_scheduler, update_loss_curve_image
 
 from utils.viz_features import tensor_to_pil_rgb
 
+import gc
+
+
+def cuda_cleanup():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
 
 @torch.no_grad()
 def save_input_patch_preview_folder(
@@ -242,41 +250,48 @@ def run_epoch_ce(
 
     loss_fn = nn.CrossEntropyLoss()
     total_loss = 0.0
+    processed_samples = 0
 
-    all_probs: list[float] = []
-    all_preds: list[int] = []
-    all_labels: list[int] = []
+    all_probs, all_preds, all_labels = [], [], []
 
-    epoch_str = f"Epoch {epoch}/{max_epoch} {split}" if split != "test" else "Test"
-    pbar = tqdm(loader, desc=epoch_str)
+    pbar = tqdm(loader, desc=f"Epoch {epoch}/{max_epoch} {split}")
 
-    for batch in pbar:
-        x = batch["pixel_values"].to(device)
-        y = batch["labels"].to(device)
+    # context manager를 사용하여 검증 시 연산 그래프 생성 방지
+    with torch.set_grad_enabled(is_train):
+        for batch in pbar:
+            x = batch["pixel_values"].to(device)
+            y = batch["labels"].to(device)
 
-        out = model(x)
-        logits = out["logits"]
+            out = model(x)
+            logits = out["logits"]
+            loss = loss_fn(logits, y)
 
-        loss = loss_fn(logits, y)
-        pbar.set_postfix({"loss": float(loss.item())})
+            if is_train:
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
 
-        if is_train:
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
+            batch_loss = loss.item()  # 스칼라 값만 가져옴
+            total_loss += batch_loss * x.size(0)
+            processed_samples += x.size(0)
+            avg_loss = total_loss / processed_samples
 
-        total_loss += float(loss.item()) * x.size(0)
+            pbar.set_postfix(
+                {"loss": f"{batch_loss:.4f}", "avg_loss": f"{avg_loss:.4f}"}
+            )
 
-        probs = torch.softmax(logits, dim=1)[:, 1]
-        preds = (probs >= float(probs_threshold)).long()
+            probs = torch.softmax(logits, dim=1)[:, 1].detach().cpu().tolist()
+            preds = (torch.tensor(probs) >= float(probs_threshold)).long().tolist()
 
-        all_probs.extend(probs.detach().cpu().tolist())
-        all_preds.extend(preds.detach().cpu().tolist())
-        all_labels.extend(y.detach().cpu().tolist())
+            all_probs.extend(probs)
+            all_preds.extend(preds)
+            all_labels.extend(y.detach().cpu().tolist())
 
-    avg_loss = total_loss / float(len(loader.dataset))
+            # [중요] 배치 데이터 명시적 삭제
+            del x, y, out, logits, loss
+
     return {
-        "loss": float(avg_loss),
+        "loss": avg_loss,
         "probs": all_probs,
         "preds": all_preds,
         "labels": all_labels,
@@ -298,50 +313,46 @@ def run_epoch_ae(
     model.train() if is_train else model.eval()
 
     total_loss = 0.0
+    processed_samples = 0
+    all_scores, all_labels, all_preds = [], [], []
 
-    all_scores: list[float] = []
-    all_labels: list[int] = []
-    all_preds: list[int] = []
+    pbar = tqdm(loader, desc=f"Epoch {epoch}/{max_epoch} {split}")
 
-    epoch_str = f"Epoch {epoch}/{max_epoch} {split}" if split != "test" else "Test"
-    pbar = tqdm(loader, desc=epoch_str)
+    with torch.set_grad_enabled(is_train):
+        for batch in pbar:
+            x = batch["pixel_values"].to(device)
+            y = batch["labels"].to(device)
 
-    for batch in pbar:
-        x = batch["pixel_values"].to(device)
-        y = batch["labels"].to(device)
+            out = model(x)
+            recon = out["recon"]
+            loss = recon_loss(recon, x)["loss"]
 
-        out = model(x)
-        recon = out["recon"]
+            if is_train:
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
 
-        loss = recon_loss(recon, x)["loss"]
-        pbar.set_postfix({"loss": float(loss.item())})
+            batch_loss = loss.item()
+            total_loss += batch_loss * x.size(0)
+            processed_samples += x.size(0)
+            avg_loss = total_loss / processed_samples
 
-        if is_train:
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
+            pbar.set_postfix(
+                {"loss": f"{batch_loss:.4f}", "avg_loss": f"{avg_loss:.4f}"}
+            )
 
-        total_loss += float(loss.item()) * x.size(0)
+            scores = anomaly_score_l1(recon.detach(), x.detach()).cpu().tolist()
+            all_scores.extend(scores)
+            all_labels.extend(y.detach().cpu().tolist())
 
-        scores = anomaly_score_l1(recon.detach(), x.detach())
-        all_scores.extend(scores.detach().cpu().tolist())
-        all_labels.extend(y.detach().cpu().tolist())
+            if threshold is not None:
+                preds = (np.array(scores) >= float(threshold)).astype(int).tolist()
+                all_preds.extend(preds)
 
-        if threshold is not None:
-            preds = (scores >= float(threshold)).long()
-            all_preds.extend(preds.detach().cpu().tolist())
+            # [중요] 배치 데이터 명시적 삭제
+            del x, y, out, recon, loss
 
-    avg_loss = total_loss / float(len(loader.dataset))
-    out_dict: dict[str, Any] = {
-        "loss": float(avg_loss),
-        "scores": all_scores,
-        "labels": all_labels,
-    }
-    if threshold is not None:
-        out_dict["preds"] = all_preds
-        out_dict["threshold"] = float(threshold)
-
-    return out_dict
+    return {"loss": avg_loss, "scores": all_scores, "labels": all_labels}
 
 
 def train_ce(
@@ -384,6 +395,9 @@ def train_ce(
             opt=opt,
             probs_threshold=config.probs_threshold,
         )
+
+        cuda_cleanup()
+
         last_valid = run_epoch_ce(
             epoch=epoch + 1,
             max_epoch=config.num_epochs,
@@ -394,6 +408,9 @@ def train_ce(
             opt=None,
             probs_threshold=config.probs_threshold,
         )
+
+        cuda_cleanup()
+
         sch.step()
 
         train_losses.append(float(last_train["loss"]))

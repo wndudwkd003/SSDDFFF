@@ -93,6 +93,7 @@ class DF_Dataset_JSON(Dataset):
             f"Current split is {split}, User augmentation: {config.use_augmentation}."
         )
         if split == "train" and config.use_augmentation:
+            print("Using data augmentation for training set.")
             self.augmenter = ImageAugmenter(AugmentConfig(), seed=config.seed)
 
         self._dbg_tfm = T.Compose(

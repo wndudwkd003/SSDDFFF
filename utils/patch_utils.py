@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import List, Tuple
 
 from PIL import Image
@@ -104,37 +103,26 @@ def _crop_kp_tile(
     return crop.resize((tile_size, tile_size), resample=Image.BICUBIC)
 
 
-def _stable_sample_seed(config_seed: int, path: str) -> int:
-    """
-    샘플별로 랜덤이 달라지되 재현 가능하도록 seed 구성.
-    """
-    h = hashlib.md5(path.encode("utf-8")).hexdigest()
-    v = int(h[:8], 16)  # 32-bit
-    return int(config_seed) ^ v
-
-
 def _make_k_tiles_8(
     pilA: Image.Image,
     face: dict,
     *,
     tile_size: int,
-    seed: int,
 ) -> List[Image.Image]:
     """
     K1~K8 생성:
     - kp 5개는 고정(kp_idx 0..4)
     - 추가 3개는 0..4 중 랜덤(중복 허용)
+    - 전역 RNG(torch) 상태를 사용 (사용자가 set_seeds로 고정한다고 가정)
     """
     base = [_crop_kp_tile(pilA, face, k, tile_size=tile_size) for k in range(5)]
 
-    g = torch.Generator()
-    g.manual_seed(int(seed))
-    extra_idx = torch.randint(low=0, high=5, size=(3,), generator=g).tolist()
+    # 전역 RNG 사용 (generator 따로 안 씀)
+    extra_idx = torch.randint(low=0, high=5, size=(3,)).tolist()
     extra = [base[i].copy() for i in extra_idx]
 
     out = base + extra
-    # base 5 + extra 3 = 8
-    return out
+    return out  # 8개
 
 
 def _build_3x3_grid(
@@ -184,25 +172,7 @@ def apply_input_patch(
     imgA: Image.Image,
     face: dict,
     config: Config,
-    *,
-    path_for_seed: str,
 ) -> Image.Image:
-    """
-    최종 입력 이미지 생성 규칙(요구사항 반영):
-
-    1) config.input_patches == []:
-       - 반환: A
-
-    2) CENTER_ZOOM만 포함:
-       - 반환: 3x3 grid
-         center = A
-         outer  = K(A) 8개
-
-    3) CENTER_ZOOM + OUTTER_FEATURE_ZOOM 포함:
-       - 반환: 3x3 grid
-         center = B (bbox crop from A)
-         outer  = K(A) 8개  (kp는 항상 A에서 crop)
-    """
     patches = list(config.input_patches or [])
     if len(patches) == 0:
         return imgA
@@ -210,19 +180,35 @@ def apply_input_patch(
     has_center = InputPatchType.CENTER_ZOOM in patches
     has_outer = InputPatchType.OUTTER_FEATURE_ZOOM in patches
 
-    # 요구사항 상 CENTER_ZOOM이 없으면 아무것도 안 함
-    if not has_center:
-        return imgA
-
     out_size = int(config.image_size)
     tile_size = out_size // 3
 
-    seed = _stable_sample_seed(config.seed, path_for_seed)
-    k_tiles = _make_k_tiles_8(imgA, face, tile_size=tile_size, seed=seed)
-
+    # 1) OUTTER가 있으면: 3x3 grid (센터는 A 또는 B)
     if has_outer:
-        center = _crop_bbox_B(imgA, face, out_size=tile_size, pad_frac=0.25)  # B
-    else:
-        center = _resize_center_crop(imgA, tile_size)  # A
+        k_tiles = _make_k_tiles_8(imgA, face, tile_size=tile_size)
 
-    return _build_3x3_grid(center=center, outer8=k_tiles, out_size=out_size)
+        if has_center:
+            # CENTER + OUTTER => 센터=B
+            center = _crop_bbox_B(
+                imgA,
+                face,
+                out_size=tile_size,  # 3x3 센터 타일 크기
+                pad_frac=float(config.pad_fraction),
+            )
+        else:
+            # OUTTER only => 센터=A
+            center = _resize_center_crop(imgA, tile_size)
+
+        return _build_3x3_grid(center=center, outer8=k_tiles, out_size=out_size)
+
+    # 2) OUTTER 없고 CENTER만 있으면: B 단독(out_size)
+    if has_center:
+        return _crop_bbox_B(
+            imgA,
+            face,
+            out_size=out_size,
+            pad_frac=float(config.pad_fraction),
+        )
+
+    # 3) 그 외: A
+    return imgA

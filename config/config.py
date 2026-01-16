@@ -29,7 +29,7 @@ class DatasetName(Enum):
     DF40 = "DF40"
     KODF_FULL = "KoDF_Full"
     VFBR = "VFBR"
-    RVF_FULL = "RVF_Full"
+    RVF_FULL = "RVF_FULL"
     FFPP_C23 = "FFPP_C23"
     DF40_EFS = "DF40_EFS"
     DF40_FE = "DF40_FE"
@@ -38,34 +38,19 @@ class DatasetName(Enum):
 
 
 SELECTED_DATASES = [
-    # (DatasetName.DF40_EFS, 1.0),
-    # (DatasetName.DF40_FE, 1.0),
-    # (DatasetName.DF40_FR, 1.0),
-    (DatasetName.DF40_FS, 1.0),
+    # (DatasetName.DF40_EFS, 0.5),
+    (DatasetName.DF40_FE, 0.5),
+    # (DatasetName.DF40_FR, 0.5),
+    # (DatasetName.DF40_FS, 0.5),
 ]
 
 
 EVALUATE_DATASES = [
-    # (DatasetName.DF40_EFS, 1.0),
-    # (DatasetName.DF40_FE, 1.0),
-    # (DatasetName.DF40_FR, 1.0),
-    (DatasetName.DF40_FS, 1.0),
+    # (DatasetName.DF40_EFS, 0.5),
+    (DatasetName.DF40_FE, 0.5),
+    # (DatasetName.DF40_FR, 0.5),
+    # (DatasetName.DF40_FS, 0.5),
 ]
-
-
-# SELECTED_DATASES = [
-#     (DatasetName.FFPP_C23, 1.0),
-# ]
-
-# EVALUATE_DATASES = [
-#     (DatasetName.REAL, 1.0),
-#     (DatasetName.DF40, 1.0),
-#     (DatasetName.KODF, 1.0),
-#     (DatasetName.CELEB_A_FAKE, 1.0),
-#     (DatasetName.TIMIT_RVF, 1.0),
-#     (DatasetName.VFBR, 1.0),
-#     (DatasetName.FFPP_C23, 1.0),
-# ]
 
 
 class InputPatchType(Enum):
@@ -74,12 +59,9 @@ class InputPatchType(Enum):
 
 
 INPUT_PATCHES = [
-    # InputPatchType.CENTER_ZOOM,
+    InputPatchType.CENTER_ZOOM,
     # InputPatchType.OUTTER_FEATURE_ZOOM,
 ]
-
-# /workspace/df40/df40_weights/train_on_df40/clip_large.pth
-
 
 USE_MODEL = ModelName.CLIP_VIT_LARGE_224
 
@@ -91,12 +73,13 @@ class Config:
     ae_normal: Literal["real", "fake"] = "real"
     input_patches: list[InputPatchType] = field(default_factory=lambda: INPUT_PATCHES)
     data_label_invert: bool = True  # True | False
-    logits_invert: bool = True  # True | False
+    logits_invert: bool = False  # True | False
     input_patch_preview_max_items: int = 8
     do_mode: str = "train"  # train | test | test_submission
     use_dataset_sum: bool = False  # True | False
     test_dir: str | None = None  # ""
-    pretrained: bool = True
+    pad_fraction: float = 0.0  # 0.25
+    pretrained: bool = True  # True | False
     pretrained_ckpt_path: (
         str | None
     ) = (  # pretrained_ckpt_path "/workspace/df40/df40_weights/train_on_df40/clip_large.pth"
@@ -111,7 +94,7 @@ class Config:
         default_factory=lambda: EVALUATE_DATASES
     )
     test_meta_csv_path: str = (
-        "/workspace/preproc_runs/20260103_095554__pad0.5__vf6__qf1__keep5__landmark1__scrfd_faceonly__force1/meta.csv"
+        "/workspace/preproc_runs/20260116_053754__primarydlib__croptight__pad0.2__vf6__keep5/meta.csv"
     )
     key_json_path: str = "keys.json"
     dacon_json_path: str = "dacon_info.json"
@@ -124,7 +107,7 @@ class Config:
         ]
     )
     input_channels: int = -1
-    use_augmentation: bool = False
+    use_augmentation: bool = False  # <<<<<<<<<<<<<<<< augmentation False | True
     SSDDFF: bool = False
     SSDDFF_mode: str = "stage1_convnextv2_train"
     run_name: str = USE_MODEL.name
@@ -133,15 +116,15 @@ class Config:
     image_size: int = 224
     probs_threshold: float = 0.5
     skip_stage1: bool = False
-    head: str = "mlp"
+    head: str = "linear"
     freeze_backbone: bool = False
 
-    num_epochs: int = 5
-    batch_size: int = 16
-    lr: float = 1e-4
-    weight_decay: float = 1e-5
+    num_epochs: int = 10
+    batch_size: int = 32  # <<<<<<<<<<<<<<<<<<<<<<<<<<<< batch size 16
+    lr: float = 3e-3
+    weight_decay: float = 1e-2
     scheduler: str = "cosine"
-    early_stopping_patience: int | None = 2
+    early_stopping_patience: int | None = 3
     early_stopping_delta: float = 1e-4
     out_dir: str = "out"
     run_dir: str = "runs"
