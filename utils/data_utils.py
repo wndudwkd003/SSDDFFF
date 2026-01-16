@@ -156,8 +156,26 @@ class DF_Dataset_CSV(Dataset):
         frame_index = int(row["frame_index"])
         rank_in_video = int(row["rank_in_video"])
 
+        face = {
+            "bbox_xyxy": [
+                float(row["bbox_x1"]),
+                float(row["bbox_y1"]),
+                float(row["bbox_x2"]),
+                float(row["bbox_y2"]),
+            ],
+            "kps_5": [
+                [float(row["kp0_x"]), float(row["kp0_y"])],
+                [float(row["kp1_x"]), float(row["kp1_y"])],
+                [float(row["kp2_x"]), float(row["kp2_y"])],
+                [float(row["kp3_x"]), float(row["kp3_y"])],
+                [float(row["kp4_x"]), float(row["kp4_y"])],
+            ],
+        }
+
         img = Image.open(crop_path).convert("RGB")
-        x = build_input_tensor(img, self.config)
+
+        prev_x = apply_input_patch(img, face, self.config)
+        x = build_input_tensor(prev_x, self.config)
 
         return {
             "pixel_values": x,
@@ -165,6 +183,8 @@ class DF_Dataset_CSV(Dataset):
             "media_type": media_type,
             "frame_index": frame_index,
             "rank_in_video": rank_in_video,
+            "crop_path": str(crop_path),
+            "face": face,
             "index": idx,
         }
 

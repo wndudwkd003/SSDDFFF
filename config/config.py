@@ -8,6 +8,7 @@ from regex import T
 class ModelName(Enum):
     CLIP_VIT_LARGE_224 = "openai/clip-vit-large-patch14"
     CONVNEXTV2_LARGE_384 = "facebook/convnextv2-large-22k-384"
+    CONVNEXTV2_BASE_224 = "facebook/convnextv2-base-22k-224"
     XCEPTION = "xception"
     XCEPTION_AE = "xception_ae"
 
@@ -39,17 +40,17 @@ class DatasetName(Enum):
 
 SELECTED_DATASES = [
     # (DatasetName.DF40_EFS, 0.5),
-    (DatasetName.DF40_FE, 0.5),
+    # (DatasetName.DF40_FE, 0.5),
     # (DatasetName.DF40_FR, 0.5),
-    # (DatasetName.DF40_FS, 0.5),
+    (DatasetName.DF40_FS, 0.5),
 ]
 
 
 EVALUATE_DATASES = [
     # (DatasetName.DF40_EFS, 0.5),
-    (DatasetName.DF40_FE, 0.5),
+    # (DatasetName.DF40_FE, 0.5),
     # (DatasetName.DF40_FR, 0.5),
-    # (DatasetName.DF40_FS, 0.5),
+    (DatasetName.DF40_FS, 0.5),
 ]
 
 
@@ -63,7 +64,7 @@ INPUT_PATCHES = [
     # InputPatchType.OUTTER_FEATURE_ZOOM,
 ]
 
-USE_MODEL = ModelName.CLIP_VIT_LARGE_224
+USE_MODEL = ModelName.XCEPTION  # <<<<<<<<<<<<<<<<<<<<<<<< use model
 
 
 @dataclass
@@ -72,18 +73,24 @@ class Config:
     model_mode: str = "ce"  # "ce" | "ae"
     ae_normal: Literal["real", "fake"] = "real"
     input_patches: list[InputPatchType] = field(default_factory=lambda: INPUT_PATCHES)
-    data_label_invert: bool = True  # True | False
+    data_label_invert: bool = False  # True | False
     logits_invert: bool = False  # True | False
     input_patch_preview_max_items: int = 8
-    do_mode: str = "train"  # train | test | test_submission
+    do_mode: str = (
+        "train"  # train | test | test_submission <<<<<<<<<<<<<<<<<<<<< do mode
+    )
     use_dataset_sum: bool = False  # True | False
-    test_dir: str | None = None  # ""
+    test_dir: str | None = (
+        "runs/20260116_092727_XCEPTION_224"  # "" | None  <<<<<<<<<<<<<<<<<<<<<<< test dir
+    )
     pad_fraction: float = 0.0  # 0.25
-    pretrained: bool = True  # True | False
+    pretrained: bool = (
+        False  # True | False # <<<<<<<<<<<<<<<<<<<<<< pretrained False | True
+    )
     pretrained_ckpt_path: (
         str | None
     ) = (  # pretrained_ckpt_path "/workspace/df40/df40_weights/train_on_df40/clip_large.pth"
-        "/workspace/df40/df40_weights/train_on_df40/clip_large.pth"
+        "runs/20260116_092727_XCEPTION_224/DF40_FE/best_stage1.pth"
     )
     seed: int = 42
     datasets_path: str = "datasets"
@@ -119,12 +126,12 @@ class Config:
     head: str = "linear"
     freeze_backbone: bool = False
 
-    num_epochs: int = 10
-    batch_size: int = 32  # <<<<<<<<<<<<<<<<<<<<<<<<<<<< batch size 16
-    lr: float = 3e-3
+    num_epochs: int = 30
+    batch_size: int = 64  # <<<<<<<<<<<<<<<<<<<<<<<<<<<< batch size 16
+    lr: float = 0.0001
     weight_decay: float = 1e-2
     scheduler: str = "cosine"
-    early_stopping_patience: int | None = 3
+    early_stopping_patience: int | None = 5
     early_stopping_delta: float = 1e-4
     out_dir: str = "out"
     run_dir: str = "runs"
